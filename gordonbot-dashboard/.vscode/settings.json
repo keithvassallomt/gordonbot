@@ -1,0 +1,31 @@
+{
+  // Open all CSS in Tailwind language mode so v4 at‑rules are understood
+  "files.associations": { "*.css": "tailwindcss" },
+
+  // Silence built‑in CSS/SCSS/LESS unknown at‑rule warnings (for @theme/@plugin/@custom-variant)
+  "css.lint.unknownAtRules": "ignore",
+  "scss.lint.unknownAtRules": "ignore",
+  "less.lint.unknownAtRules": "ignore",
+
+  // Tailwind IntelliSense quality‑of‑life
+  "tailwindCSS.emmetCompletions": true,
+  "editor.quickSuggestions": { "strings": true },
+  "tailwindCSS.includeLanguages": {
+    "typescript": "javascript",
+    "typescriptreact": "javascriptreact"
+  },
+
+  // ESLint on save (unchanged from your setup)
+  "eslint.validate": ["javascript", "javascriptreact", "typescript", "typescriptreact"],
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "always"
+  },
+
+  // Tidy workspace
+  "files.exclude": {
+    "**/.git": true,
+    "**/.DS_Store": true,
+    "**/node_modules": true,
+    "**/dist": true
+  }
+}
