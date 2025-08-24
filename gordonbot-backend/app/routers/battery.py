@@ -1,21 +1,24 @@
 from __future__ import annotations
 from fastapi import APIRouter
 from app.schemas import BatteryData
+from app.services.battery import get_battery_status
 
 router = APIRouter()
 
 @router.get("/battery/status", response_model=BatteryData, tags=["battery"])
 async def battery_status() -> BatteryData:
-    # TODO: Replace with real sensor reads
+    
+    data = get_battery_status()
+    
     return BatteryData(
-        percent=83.0,
-        charging=False,
-        vbusVoltage=5.02,
-        vbusCurrent=0.12,
-        vbusPower=0.60,
-        batteryVoltage=15.8,
-        batteryCurrent=-0.85,
-        remainingCapacity=220.0,
-        avgTimeToFullMin=None,
-        cells=[3.95, 3.95, 3.95, 3.95],
+        percent=data["battery_percent"],
+        charging=data["battery_status"] in ["charging", "fast_charging", "discharging"],
+        vbusVoltage=data["vbus_voltage"],
+        vbusCurrent=data["vbus_current"],
+        vbusPower=data["vbus_power"],
+        batteryVoltage=data["battery_voltage"],
+        batteryCurrent=data["current"],
+        remainingCapacity=data["remaining_capacity"],
+        avgTimeToFullMin=data["avg_time_to_full"],
+        cells=data["cells"]
     )

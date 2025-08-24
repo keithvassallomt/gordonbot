@@ -59,7 +59,7 @@ export type Vec2 = { x: number; y: number }
  */
 export type BatteryData = {
   percent: number // 0..100
-  charging?: boolean
+  charging?: "idle" | "charging" | "fast_charging" | "discharging"
   vbusVoltage?: number // V
   vbusCurrent?: number // A
   vbusPower?: number // W

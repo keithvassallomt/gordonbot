@@ -13,9 +13,9 @@ import { useBattery } from "@/components/hooks/useBattery"
  * @param unit - Optional unit string (e.g. "V").
  * @returns Formatted string or em-dash if invalid.
  */
-function fmt(n?: number, unit?: string) {
+function fmt(n?: number, unit?: string, precision: number = 2) {
   if (n == null || isNaN(n)) return "—"
-  return unit ? `${n.toFixed(2)} ${unit}` : n.toFixed(2)
+  return unit ? `${n.toFixed(precision)} ${unit}` : n.toFixed(precision)
 }
 
 /**
@@ -50,8 +50,6 @@ function KV({ label, value }: { label: string; value: string }) {
  * ```
  */
 export default function BatteryPanel() {
-  // If you haven't extracted the hook yet, import from the original file or temporarily re-implement.
-  // Here we assume you've moved it to hooks/useBattery.
   const { data, error, refresh } = useBattery(10000)
   const percent = Math.max(0, Math.min(100, data?.percent ?? 0))
   const charging = data?.charging ?? false
@@ -66,9 +64,24 @@ export default function BatteryPanel() {
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Badge variant={charging ? "default" : "secondary"} className="flex items-center gap-1">
-                  {charging ? <PlugZap className="h-3 w-3" /> : <Power className="h-3 w-3" />}
-                  {charging ? "Charging" : "On Battery"}
+                <Badge
+                  variant={
+                    charging === "charging" || charging === "fast_charging"
+                      ? "default"
+                      : charging === "discharging"
+                      ? "destructive"
+                      : "secondary"
+                  }
+                  className="flex items-center gap-1"
+                >
+                  {charging === "charging" && <PlugZap className="h-3 w-3" />}
+                  {charging === "fast_charging" && <PlugZap className="h-3 w-3 animate-pulse" />}
+                  {charging === "discharging" && <Power className="h-3 w-3" />}
+                  {charging === "idle" && <Battery className="h-3 w-3" />}
+                  {charging === "charging" && "Charging"}
+                  {charging === "fast_charging" && "Fast Charging"}
+                  {charging === "discharging" && "Discharging"}
+                  {charging === "idle" && "Idle"}
                 </Badge>
               </TooltipTrigger>
               <TooltipContent>Charging state</TooltipContent>
@@ -104,7 +117,7 @@ export default function BatteryPanel() {
               <KV label="VBUS Power" value={fmt(data?.vbusPower, "W")} />
               <KV label="Battery Voltage" value={fmt(data?.batteryVoltage, "V")} />
               <KV label="Battery Current" value={fmt(data?.batteryCurrent, "A")} />
-              <KV label="Remaining Capacity" value={fmt(data?.remainingCapacity)} />
+              <KV label="Remaining Capacity" value={fmt(data?.remainingCapacity, "mAh", 0)} />
               <KV
                 label="Avg Time to Full"
                 value={data?.avgTimeToFullMin != null ? `${data.avgTimeToFullMin} min` : "—"}

@@ -6,7 +6,7 @@ from typing import List, Optional
 
 class BatteryData(BaseModel):
     percent: float = Field(ge=0, le=100)
-    charging: Optional[bool] = None
+    charging: Optional[str] = Field(default=None, description="One of: 'idle', 'charging', 'fast_charging', 'discharging'")
     vbusVoltage: Optional[float] = None
     vbusCurrent: Optional[float] = None
     vbusPower: Optional[float] = None
