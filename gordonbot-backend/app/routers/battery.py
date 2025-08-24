@@ -12,7 +12,7 @@ async def battery_status() -> BatteryData:
     
     return BatteryData(
         percent=data["battery_percent"],
-        charging=data["battery_status"] in ["charging", "fast_charging", "discharging"],
+        charging=data["battery_status"],
         vbusVoltage=data["vbus_voltage"],
         vbusCurrent=data["vbus_current"],
         vbusPower=data["vbus_power"],

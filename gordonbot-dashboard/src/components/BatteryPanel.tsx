@@ -117,7 +117,7 @@ export default function BatteryPanel() {
               <KV label="VBUS Power" value={fmt(data?.vbusPower, "W")} />
               <KV label="Battery Voltage" value={fmt(data?.batteryVoltage, "V")} />
               <KV label="Battery Current" value={fmt(data?.batteryCurrent, "A")} />
-              <KV label="Remaining Capacity" value={fmt(data?.remainingCapacity, "mAh", 0)} />
+              <KV label="Available" value={fmt(data?.remainingCapacity, "mAh", 0)} />
               <KV
                 label="Avg Time to Full"
                 value={data?.avgTimeToFullMin != null ? `${data.avgTimeToFullMin} min` : "—"}

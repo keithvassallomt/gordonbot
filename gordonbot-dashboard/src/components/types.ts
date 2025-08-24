@@ -69,3 +69,14 @@ export type BatteryData = {
   avgTimeToFullMin?: number // minutes
   cells?: number[] // [c1, c2, c3, c4] in V
 }
+
+// Diagnostics domain
+/**
+ * System diagnostics data from the robot.
+ * @property cpu_load - CPU load percentage (0..100).
+ * @property cpu_temperature - CPU temperature in Celsius (if available).
+ */
+export type DiagnosticsData = {
+  cpu_load: number // 0..100
+  cpu_temperature?: number // Celsius
+} 
