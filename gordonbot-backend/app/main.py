@@ -29,7 +29,7 @@ api.include_router(diagnostics_router.router, prefix="")
 app.mount(settings.api_prefix, api)
 
 # WebSocket (mounted on the root app, not under /api)
-app.router.routes.append(control_socket.router.routes[0])
+app.include_router(control_socket.router)
 
 # (Optional for deployment) Serve built frontend from ./dist
 # app.mount("/", StaticFiles(directory="dist", html=True), name="static")

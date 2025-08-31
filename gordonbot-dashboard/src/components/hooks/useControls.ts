@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
+import { KEY_ACCEL_PER_S, KEY_DECEL_PER_S, KEY_TURN_ACCEL_PER_S, KEY_TURN_DECEL_PER_S } from "@/components/config"
 import type { Vec2 } from "../types"
 
 /**
@@ -47,24 +48,26 @@ export function vecToTank(v: Vec2): { left: number; right: number } {
 export function useKeyboardDrive() {
   const [vec, setVec] = useState<Vec2>({ x: 0, y: 0 })
   const [boost, setBoost] = useState(false)
+  // Target vector updated by key events; output vec approaches target smoothly
+  const targetRef = useRef<Vec2>({ x: 0, y: 0 })
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       switch (e.key) {
         case "Shift": setBoost(true); break
-        case "ArrowUp": case "w": case "W": setVec(v => ({ ...v, y: 1 })); break
-        case "ArrowDown": case "s": case "S": setVec(v => ({ ...v, y: -1 })); break
-        case "ArrowLeft": case "a": case "A": setVec(v => ({ ...v, x: -1 })); break
-        case "ArrowRight": case "d": case "D": setVec(v => ({ ...v, x: 1 })); break
+        case "ArrowUp": case "w": case "W": targetRef.current = { ...targetRef.current, y: 1 }; break
+        case "ArrowDown": case "s": case "S": targetRef.current = { ...targetRef.current, y: -1 }; break
+        case "ArrowLeft": case "a": case "A": targetRef.current = { ...targetRef.current, x: -1 }; break
+        case "ArrowRight": case "d": case "D": targetRef.current = { ...targetRef.current, x: 1 }; break
       }
     }
     const up = (e: KeyboardEvent) => {
       switch (e.key) {
         case "Shift": setBoost(false); break
-        case "ArrowUp": case "w": case "W": setVec(v => ({ ...v, y: 0 })); break
-        case "ArrowDown": case "s": case "S": setVec(v => ({ ...v, y: 0 })); break
-        case "ArrowLeft": case "a": case "A": setVec(v => ({ ...v, x: 0 })); break
-        case "ArrowRight": case "d": case "D": setVec(v => ({ ...v, x: 0 })); break
+        case "ArrowUp": case "w": case "W": targetRef.current = { ...targetRef.current, y: 0 }; break
+        case "ArrowDown": case "s": case "S": targetRef.current = { ...targetRef.current, y: 0 }; break
+        case "ArrowLeft": case "a": case "A": targetRef.current = { ...targetRef.current, x: 0 }; break
+        case "ArrowRight": case "d": case "D": targetRef.current = { ...targetRef.current, x: 0 }; break
       }
     }
     window.addEventListener("keydown", down)
@@ -75,5 +78,82 @@ export function useKeyboardDrive() {
     }
   }, [])
 
+  // Smoothly approach target at fixed accel/decel rates
+  useEffect(() => {
+    let raf = 0
+    let last = performance.now()
+
+    const step = (now: number) => {
+      const dt = Math.max(0, Math.min(0.05, (now - last) / 1000)) // clamp dt to 50ms
+      last = now
+      setVec((v) => {
+        const tx = clamp(targetRef.current.x)
+        const ty = clamp(targetRef.current.y)
+
+        const approach = (cur: number, tgt: number, accelPerS: number, decelPerS: number) => {
+          const rate = Math.abs(tgt) > Math.abs(cur) ? accelPerS : decelPerS
+          const maxDelta = rate * dt
+          const delta = clamp(tgt - cur, -maxDelta, maxDelta)
+          const next = clamp(cur + delta)
+          return Math.abs(next - tgt) < 1e-4 ? tgt : next
+        }
+
+        const nx = approach(v.x, tx, KEY_TURN_ACCEL_PER_S, KEY_TURN_DECEL_PER_S)
+        const ny = approach(v.y, ty, KEY_ACCEL_PER_S, KEY_DECEL_PER_S)
+        return (nx === v.x && ny === v.y) ? v : { x: nx, y: ny }
+      })
+      raf = requestAnimationFrame(step)
+    }
+    raf = requestAnimationFrame(step)
+    return () => cancelAnimationFrame(raf)
+  }, [])
+
   return { vec, boost }
+}
+
+/**
+ * Smooth an input vector toward a target vector using per-axis accel/decel.
+ *
+ * @param source - The raw input vector to follow.
+ * @param params - Optional per-axis acceleration/deceleration rates (units/s).
+ * @returns Smoothed output vector.
+ */
+export function useSmoothedVec(
+  source: Vec2,
+  params?: { accelX?: number; decelX?: number; accelY?: number; decelY?: number }
+) {
+  const { accelX = KEY_ACCEL_PER_S, decelX = KEY_DECEL_PER_S, accelY = KEY_ACCEL_PER_S, decelY = KEY_DECEL_PER_S } = params || {}
+  const [vec, setVec] = useState<Vec2>(source)
+  const targetRef = useRef<Vec2>(source)
+
+  // Track latest source
+  useEffect(() => { targetRef.current = source }, [source.x, source.y])
+
+  useEffect(() => {
+    let raf = 0
+    let last = performance.now()
+    const step = (now: number) => {
+      const dt = Math.max(0, Math.min(0.05, (now - last) / 1000))
+      last = now
+      setVec((v) => {
+        const tx = clamp(targetRef.current.x)
+        const ty = clamp(targetRef.current.y)
+        const approach = (cur: number, tgt: number, acc: number, dec: number) => {
+          const rate = Math.abs(tgt) > Math.abs(cur) ? acc : dec
+          const maxDelta = rate * dt
+          const delta = clamp(tgt - cur, -maxDelta, maxDelta)
+          const next = clamp(cur + delta)
+          return Math.abs(next - tgt) < 1e-4 ? tgt : next
+        }
+        const nx = approach(v.x, tx, accelX, decelX)
+        const ny = approach(v.y, ty, accelY, decelY)
+        return (nx === v.x && ny === v.y) ? v : { x: nx, y: ny }
+      })
+      raf = requestAnimationFrame(step)
+    }
+    raf = requestAnimationFrame(step)
+    return () => cancelAnimationFrame(raf)
+  }, [accelX, decelX, accelY, decelY])
+
+  return vec
 }

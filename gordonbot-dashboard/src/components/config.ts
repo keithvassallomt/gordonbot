@@ -39,3 +39,43 @@ export const MAX_SPEED = 1.0
  * Multiplier applied when boost (Shift) is active.
  */
 export const BOOST_MULTIPLIER = 1.5
+
+// Keyboard drive ramp (smooth acceleration/deceleration)
+/**
+ * Keyboard acceleration rate (units per second to approach target).
+ * 1.2 -> ~0.83s from 0 to 1.0 (slower, gentler start)
+ */
+export const KEY_ACCEL_PER_S = 1.2
+/**
+ * Keyboard deceleration rate (units per second back toward 0/target).
+ * Lower than before to avoid abrupt stops.
+ */
+export const KEY_DECEL_PER_S = 2.0
+
+/**
+ * Keyboard turn acceleration rate (A/D keys), units per second.
+ * Matches forward accel by default; tune separately if needed.
+ */
+export const KEY_TURN_ACCEL_PER_S = 1.2
+/**
+ * Keyboard turn deceleration rate (A/D keys), units per second.
+ */
+export const KEY_TURN_DECEL_PER_S = 2.0
+
+// Joystick smoothing (apply same defaults; tune independently if needed)
+/**
+ * Joystick forward/back acceleration (units per second).
+ */
+export const JOY_ACCEL_PER_S = 1.2
+/**
+ * Joystick forward/back deceleration (units per second).
+ */
+export const JOY_DECEL_PER_S = 2.0
+/**
+ * Joystick turn acceleration (units per second).
+ */
+export const JOY_TURN_ACCEL_PER_S = 1.2
+/**
+ * Joystick turn deceleration (units per second).
+ */
+export const JOY_TURN_DECEL_PER_S = 2.0

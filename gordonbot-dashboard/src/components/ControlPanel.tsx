@@ -7,9 +7,9 @@ import { Gamepad2 } from "lucide-react"
 import JoystickPad from "@/components/JoystickPad"
 import KV from "@/components/KV"
 
-import { DEADMAN_MS, COMMAND_HZ, MAX_SPEED, BOOST_MULTIPLIER } from "@/components/config"
+import { DEADMAN_MS, COMMAND_HZ, MAX_SPEED, BOOST_MULTIPLIER, JOY_ACCEL_PER_S, JOY_DECEL_PER_S, JOY_TURN_ACCEL_PER_S, JOY_TURN_DECEL_PER_S } from "@/components/config"
 import type { ControlTransport, ControlCommand, Vec2 } from "@/components/types"
-import { clamp, useKeyboardDrive, vecToTank } from "@/components/hooks/useControls"
+import { clamp, useKeyboardDrive, useSmoothedVec, vecToTank } from "@/components/hooks/useControls"
 
 /**
  * Drive control panel (tank mode).
@@ -35,6 +35,12 @@ import { clamp, useKeyboardDrive, vecToTank } from "@/components/hooks/useContro
  */
 export default function ControlPanel({ transport }: { transport: ControlTransport }) {
   const [joyVec, setJoyVec] = useState<Vec2>({ x: 0, y: 0 })
+  const joySmoothed = useSmoothedVec(joyVec, {
+    accelX: JOY_TURN_ACCEL_PER_S,
+    decelX: JOY_TURN_DECEL_PER_S,
+    accelY: JOY_ACCEL_PER_S,
+    decelY: JOY_DECEL_PER_S,
+  })
   const { vec: keyVec, boost } = useKeyboardDrive()
   const [lastCmd, setLastCmd] = useState<ControlCommand | null>(null)
   const [enabled] = useState(true)
@@ -43,9 +49,9 @@ export default function ControlPanel({ transport }: { transport: ControlTranspor
    * Combined joystick + keyboard vector, clamped to [-1, 1] per axis.
    */
   const merged: Vec2 = useMemo(() => ({
-    x: clamp(joyVec.x + keyVec.x, -1, 1),
-    y: clamp(joyVec.y + keyVec.y, -1, 1),
-  }), [joyVec, keyVec])
+    x: clamp(joySmoothed.x + keyVec.x, -1, 1),
+    y: clamp(joySmoothed.y + keyVec.y, -1, 1),
+  }), [joySmoothed, keyVec])
 
   /**
    * Update the last-input timestamp whenever the merged vector changes.
@@ -63,6 +69,11 @@ export default function ControlPanel({ transport }: { transport: ControlTranspor
     let id: number
     const tick = () => {
       const now = performance.now()
+      // Treat a held non-zero command as active input to avoid tripping
+      // the client dead-man while a key is held or joystick is steady.
+      if (Math.hypot(merged.x, merged.y) > 1e-3) {
+        lastInputRef.current = now
+      }
       const inactive = now - lastInputRef.current > DEADMAN_MS
       const base = vecToTank(merged)
       const m = (boost ? BOOST_MULTIPLIER : 1) * MAX_SPEED
