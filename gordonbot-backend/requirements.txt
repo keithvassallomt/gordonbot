@@ -6,3 +6,4 @@ psutil==6.0.0
 gpiozero==1.6.2
 python-dotenv==1.0.1
 rpi-lgpio
+Pillow==10.4.0

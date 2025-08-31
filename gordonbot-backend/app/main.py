@@ -7,6 +7,7 @@ from app.core.config import settings
 from app.routers import ping as ping_router
 from app.routers import battery as battery_router
 from app.routers import diagnostics as diagnostics_router
+from app.routers import video as video_router
 from app.sockets import control as control_socket
 
 app = FastAPI(title="GordonBot Backend", version="0.1.0")
@@ -25,6 +26,7 @@ api = FastAPI()
 api.include_router(ping_router.router, prefix="")
 api.include_router(battery_router.router, prefix="")
 api.include_router(diagnostics_router.router, prefix="")
+api.include_router(video_router.router, prefix="")
 
 app.mount(settings.api_prefix, api)
 
