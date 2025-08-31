@@ -9,6 +9,7 @@ from app.routers import battery as battery_router
 from app.routers import diagnostics as diagnostics_router
 from app.routers import video as video_router
 from app.sockets import control as control_socket
+from app.services.camera import camera
 
 app = FastAPI(title="GordonBot Backend", version="0.1.0")
 
@@ -35,3 +36,15 @@ app.include_router(control_socket.router)
 
 # (Optional for deployment) Serve built frontend from ./dist
 # app.mount("/", StaticFiles(directory="dist", html=True), name="static")
+
+
+@app.on_event("startup")
+async def _start_streaming_if_configured() -> None:
+    # Optionally publish to an RTSP server (e.g., MediaMTX) if configured
+    if settings.camera_rtsp_url:
+        camera.start_publisher(settings.camera_rtsp_url, bitrate=settings.camera_bitrate)
+
+
+@app.on_event("shutdown")
+async def _stop_streaming() -> None:
+    camera.stop_publisher()

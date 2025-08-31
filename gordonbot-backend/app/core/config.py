@@ -18,6 +18,8 @@ class Settings(BaseModel):
     api_prefix: str = "/api"
     control_ws_path: str = "/ws/control"
     verbose: bool = _getenv_bool("VERBOSE", False)
+    camera_rtsp_url: str | None = os.getenv("CAMERA_RTSP_URL")
+    camera_bitrate: int = int(os.getenv("CAMERA_BITRATE", "2000000"))
 
 # Simple settings instance (expand later for env vars)
 settings = Settings()

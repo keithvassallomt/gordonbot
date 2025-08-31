@@ -51,14 +51,43 @@ class Camera:
         self._picam: Optional[Picamera2] = None  # type: ignore
         self._lock = threading.Lock()
         self._start_time = time.time()
+        # Buffers for latest frames
+        self._last_frame_main = None  # type: ignore
+        self._last_frame_lores = None  # type: ignore
+        # Publishing state
+        self._publishing = False
+        self._publish_lock = threading.Lock()
+        self._ffmpeg_proc = None
 
         if _PICAM_AVAILABLE:
             try:
                 cam = Picamera2()  # type: ignore
+                # Configure dual streams: main (RGB for display/encode), lores (YUV for CV)
                 cfg = cam.create_video_configuration(
-                    main={"size": (self.width, self.height), "format": "RGB888"}
+                    main={"size": (self.width, self.height), "format": "RGB888"},
+                    lores={"size": (max(160, self.width // 4), max(120, self.height // 4)), "format": "YUV420"},
                 )
                 cam.configure(cfg)
+
+                def _on_frame(request):  # type: ignore
+                    try:
+                        # Update latest lores (best-effort)
+                        try:
+                            arr_lo = request.make_array("lores")
+                            self._last_frame_lores = arr_lo
+                        except Exception:
+                            pass
+                        # Update latest main
+                        try:
+                            arr_main = request.make_array("main")
+                            self._last_frame_main = arr_main
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+
+                cam.post_callback = _on_frame  # type: ignore
+
                 cam.start()
                 self._picam = cam
             except Exception:
@@ -99,18 +128,46 @@ class Camera:
         img.save(buf, format="JPEG", quality=self.quality)
         return buf.getvalue()
 
-    def capture_jpeg(self) -> bytes:
-        # Thread-safe capture to avoid concurrent access
+    def _latest_frame(self):
+        # Return latest frame array and whether it's RGB (True) or YUV (False)
         with self._lock:
             if self._picam is None:
-                return self._placeholder_frame()
+                return None, True
+            if self._last_frame_main is not None:
+                return self._last_frame_main, True
+            if self._last_frame_lores is not None:
+                return self._last_frame_lores, False
+            try:
+                arr = self._picam.capture_array()
+                self._last_frame_main = arr
+                return arr, True
+            except Exception:
+                return None, True
 
-            # Picamera2 returns an RGB numpy array with this configuration
-            arr = self._picam.capture_array()
-            img = Image.fromarray(arr)
+    def latest_arrays(self) -> tuple[object | None, object | None]:
+        """Return a tuple of (main, lores) numpy arrays if available.
+
+        Returned objects are numpy ndarrays or None when not yet captured.
+        """
+        with self._lock:
+            return self._last_frame_main, self._last_frame_lores
+
+    def capture_jpeg(self) -> bytes:
+        # Use latest frame if available; fallback to on-demand capture or placeholder
+        frame, is_rgb = self._latest_frame()
+        if frame is None:
+            return self._placeholder_frame()
+        try:
+            if is_rgb:
+                img = Image.fromarray(frame)
+            else:
+                # Converting YUV420 to RGB here is non-trivial without cv2; use placeholder for now
+                return self._placeholder_frame()
             buf = io.BytesIO()
             img.save(buf, format="JPEG", quality=self.quality)
             return buf.getvalue()
+        except Exception:
+            return self._placeholder_frame()
 
     def mjpeg_generator(self) -> Generator[bytes, None, None]:
         # multipart/x-mixed-replace generator yielding JPEG parts
@@ -120,6 +177,78 @@ class Camera:
             yield b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " + str(len(frame)).encode() + b"\r\n\r\n" + frame + b"\r\n"
             time.sleep(delay)
 
+    # ---- Publisher to MediaMTX (RTSP) using Picamera2 encoder -----------------
+    def start_publisher(self, rtsp_url: str, bitrate: int = 2_000_000) -> bool:
+        """Publish H.264 to RTSP via ffmpeg pipe for reliability.
 
-# Singleton camera instance
-camera = Camera()
+        Avoids Picamera2 FfmpegOutput autodetection issues with URL sinks.
+        """
+        if not _PICAM_AVAILABLE or self._picam is None:
+            logging.getLogger(__name__).warning("start_publisher: Picamera2 not available")
+            return False
+        with self._publish_lock:
+            if self._publishing:
+                return True
+            try:
+                from picamera2.encoders import H264Encoder  # type: ignore
+                from picamera2.outputs import FileOutput  # type: ignore
+                import subprocess, shlex
+
+                # Launch ffmpeg to read raw H.264 from stdin and push to RTSP
+                cmd = [
+                    "ffmpeg", "-loglevel", "warning", "-re",
+                    "-f", "h264", "-i", "-",
+                    "-c", "copy",
+                    "-f", "rtsp", rtsp_url,
+                ]
+                self._ffmpeg_proc = subprocess.Popen(
+                    cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
+                )
+                if not self._ffmpeg_proc or not self._ffmpeg_proc.stdin:
+                    logging.getLogger(__name__).error("Failed to start ffmpeg subprocess for RTSP publish")
+                    return False
+
+                encoder = H264Encoder(bitrate=bitrate)
+                sink = FileOutput(self._ffmpeg_proc.stdin)
+                self._picam.start_recording(encoder, sink, name="main")
+                self._publishing = True
+                logging.getLogger(__name__).info("Started publishing to %s", rtsp_url)
+                return True
+            except FileNotFoundError:
+                logging.getLogger(__name__).error("ffmpeg not found; install it with 'sudo apt install -y ffmpeg'")
+                self._publishing = False
+                return False
+            except Exception as e:
+                logging.getLogger(__name__).exception("Failed to start publisher: %s", e)
+                self._publishing = False
+                # Ensure ffmpeg is torn down if partially started
+                try:
+                    if self._ffmpeg_proc:
+                        self._ffmpeg_proc.kill()
+                except Exception:
+                    pass
+                self._ffmpeg_proc = None
+                return False
+
+    def stop_publisher(self) -> None:
+        if not _PICAM_AVAILABLE or self._picam is None:
+            return
+        with self._publish_lock:
+            if not self._publishing:
+                return
+            try:
+                self._picam.stop_recording()
+            except Exception:
+                pass
+            try:
+                if self._ffmpeg_proc:
+                    self._ffmpeg_proc.stdin.close()  # type: ignore[union-attr]
+                    self._ffmpeg_proc.terminate()
+            except Exception:
+                pass
+            self._ffmpeg_proc = None
+            self._publishing = False
+
+
+# Singleton camera instance (1080p)
+camera = Camera(width=1920, height=1080, fps=15, quality=85)

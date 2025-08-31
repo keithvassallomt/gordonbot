@@ -14,6 +14,14 @@ export const BATTERY_ENDPOINT = "/api/battery/status"
  * REST endpoint path for ping checks.
  */
 export const PING_ENDPOINT = "/api/ping"
+/**
+ * MJPEG video stream path for robot camera.
+ */
+export const VIDEO_MJPEG_ENDPOINT = "/api/video/stream.mjpg"
+/**
+ * Snapshot path for robot camera.
+ */
+export const VIDEO_SNAPSHOT_ENDPOINT = "/api/video/snapshot.jpg"
 
 // Control transport (WebSocket path mounted on the robot)
 /**
