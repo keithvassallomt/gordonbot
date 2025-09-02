@@ -1,5 +1,6 @@
 from __future__ import annotations
 import io
+import os
 import time
 import threading
 from typing import Generator, Optional
@@ -54,6 +55,9 @@ class Camera:
         # Buffers for latest frames
         self._last_frame_main = None  # type: ignore
         self._last_frame_lores = None  # type: ignore
+        # Some platforms deliver "RGB888" as BGR in memory; allow swapping.
+        # Set CAMERA_SWAP_RB=0 to disable if colors look wrong after this change.
+        self._swap_rb = os.environ.get("CAMERA_SWAP_RB", "1") not in ("0", "false", "False")
         # Publishing state
         self._publishing = False
         self._publish_lock = threading.Lock()
@@ -159,7 +163,14 @@ class Camera:
             return self._placeholder_frame()
         try:
             if is_rgb:
-                img = Image.fromarray(frame)
+                # Ensure RGB channel order for PIL; swap if needed
+                try:
+                    if self._swap_rb and getattr(frame, "ndim", 0) == 3 and frame.shape[2] == 3:
+                        img = Image.fromarray(frame[:, :, ::-1])  # BGR -> RGB
+                    else:
+                        img = Image.fromarray(frame)
+                except Exception:
+                    img = Image.fromarray(frame)
             else:
                 # Converting YUV420 to RGB here is non-trivial without cv2; use placeholder for now
                 return self._placeholder_frame()
