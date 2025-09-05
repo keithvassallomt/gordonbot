@@ -1,4 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useEffect } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Camera, Map as MapIcon } from "lucide-react"
@@ -45,6 +46,13 @@ export default function GordonBotDashboard() {
   const theme = useThemeMode();
   const transport = useControlTransport(CONTROL_WS_PATH)
   const { data: battery } = useBattery(10000);
+
+  // Auto-connect drive controls on load; clean up on unmount
+  useEffect(() => {
+    transport.connect();
+    return () => { transport.disconnect(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   return (
     <TooltipProvider>

@@ -6,7 +6,7 @@ import threading
 from typing import Generator, Optional
 import logging
 
-from PIL import Image, ImageDraw, ImageFont  # type: ignore
+from PIL import Image  # type: ignore
 
 try:
     # Picamera2 is normally installed via apt: `sudo apt install -y python3-picamera2`
@@ -41,7 +41,6 @@ class Camera:
     """Minimal camera abstraction producing JPEG frames.
 
     - Uses Picamera2 when available (on Raspberry Pi)
-    - Falls back to a generated placeholder frame off-device
     """
 
     def __init__(self, width: int = 640, height: int = 480, quality: int = 80, fps: int = 10) -> None:
@@ -51,6 +50,7 @@ class Camera:
         self.fps = fps
         self._picam: Optional[Picamera2] = None  # type: ignore
         self._lock = threading.Lock()
+        self._open_lock = threading.Lock()
         self._start_time = time.time()
         # Buffers for latest frames
         self._last_frame_main = None  # type: ignore
@@ -63,43 +63,9 @@ class Camera:
         self._publish_lock = threading.Lock()
         self._ffmpeg_proc = None
 
-        if _PICAM_AVAILABLE:
-            try:
-                cam = Picamera2()  # type: ignore
-                # Configure dual streams: main (RGB for display/encode), lores (YUV for CV)
-                cfg = cam.create_video_configuration(
-                    main={"size": (self.width, self.height), "format": "RGB888"},
-                    lores={"size": (max(160, self.width // 4), max(120, self.height // 4)), "format": "YUV420"},
-                )
-                cam.configure(cfg)
-
-                def _on_frame(request):  # type: ignore
-                    try:
-                        # Update latest lores (best-effort)
-                        try:
-                            arr_lo = request.make_array("lores")
-                            self._last_frame_lores = arr_lo
-                        except Exception:
-                            pass
-                        # Update latest main
-                        try:
-                            arr_main = request.make_array("main")
-                            self._last_frame_main = arr_main
-                        except Exception:
-                            pass
-                    except Exception:
-                        pass
-
-                cam.post_callback = _on_frame  # type: ignore
-
-                cam.start()
-                self._picam = cam
-            except Exception:
-                # Fall back to placeholder if camera init fails
-                self._picam = None
-                logging.getLogger(__name__).warning("Picamera2 present but failed to init; using placeholder frames.")
-        else:
-            logging.getLogger(__name__).info("Picamera2 not available; using placeholder frames.")
+        # Defer opening Picamera2 until first use (capture or publisher)
+        if not _PICAM_AVAILABLE:
+            raise RuntimeError("Picamera2 not available; install python3-picamera2 or run on the device.")
 
     def close(self) -> None:
         with self._lock:
@@ -110,43 +76,62 @@ class Camera:
                     pass
                 self._picam = None
 
-    def _placeholder_frame(self) -> bytes:
-        # Simple generated image with timestamp for dev machines
-        img = Image.new("RGB", (self.width, self.height), (20, 20, 20))
-        draw = ImageDraw.Draw(img)
-        t = time.time() - self._start_time
-        msg = f"GordonBot Camera\nDEV PLACEHOLDER\n{t:6.2f}s"
-        # Use default font; keep it legible
-        try:
-            font = ImageFont.load_default()
-        except Exception:
-            font = None  # type: ignore
-        draw.rectangle([(10, 10), (self.width - 10, self.height - 10)], outline=(0, 200, 200), width=2)
-        draw.text((20, 20), msg, fill=(200, 200, 0), font=font, spacing=4)
-        # Moving marker for visual change
-        x = int((t * 40) % (self.width - 40)) + 20
-        y = int((t * 25) % (self.height - 40)) + 20
-        draw.ellipse([(x - 10, y - 10), (x + 10, y + 10)], outline=(255, 100, 0), width=3)
+    def _ensure_open(self) -> None:
+        if self._picam is not None:
+            return
+        with self._open_lock:
+            if self._picam is not None:
+                return
+            try:
+                cam = Picamera2()  # type: ignore
+                cfg = cam.create_video_configuration(
+                    main={"size": (self.width, self.height), "format": "RGB888"},
+                    lores={"size": (max(160, self.width // 4), max(120, self.height // 4)), "format": "YUV420"},
+                )
+                cam.configure(cfg)
 
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=self.quality)
-        return buf.getvalue()
+                def _on_frame(request):  # type: ignore
+                    try:
+                        try:
+                            arr_lo = request.make_array("lores")
+                            self._last_frame_lores = arr_lo
+                        except Exception:
+                            pass
+                        try:
+                            arr_main = request.make_array("main")
+                            self._last_frame_main = arr_main
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+
+                cam.post_callback = _on_frame  # type: ignore
+                cam.start()
+                self._picam = cam
+            except Exception as e:
+                self._picam = None
+                raise RuntimeError("Failed to initialize Picamera2") from e
 
     def _latest_frame(self):
         # Return latest frame array and whether it's RGB (True) or YUV (False)
         with self._lock:
-            if self._picam is None:
-                return None, True
-            if self._last_frame_main is not None:
-                return self._last_frame_main, True
-            if self._last_frame_lores is not None:
-                return self._last_frame_lores, False
-            try:
-                arr = self._picam.capture_array()
+            picam = self._picam
+            last_main = self._last_frame_main
+        if picam is None:
+            # Open lazily on first use
+            self._ensure_open()
+            with self._lock:
+                picam = self._picam
+                last_main = self._last_frame_main
+        if last_main is not None:
+            return last_main, True
+        try:
+            arr = picam.capture_array()  # type: ignore[union-attr]
+            with self._lock:
                 self._last_frame_main = arr
-                return arr, True
-            except Exception:
-                return None, True
+            return arr, True
+        except Exception:
+            return None, True
 
     def latest_arrays(self) -> tuple[object | None, object | None]:
         """Return a tuple of (main, lores) numpy arrays if available.
@@ -157,10 +142,10 @@ class Camera:
             return self._last_frame_main, self._last_frame_lores
 
     def capture_jpeg(self) -> bytes:
-        # Use latest frame if available; fallback to on-demand capture or placeholder
+        # Use latest frame if available; otherwise raise to surface issues
         frame, is_rgb = self._latest_frame()
         if frame is None:
-            return self._placeholder_frame()
+            raise RuntimeError("No frame available from camera")
         try:
             if is_rgb:
                 # Ensure RGB channel order for PIL; swap if needed
@@ -172,13 +157,12 @@ class Camera:
                 except Exception:
                     img = Image.fromarray(frame)
             else:
-                # Converting YUV420 to RGB here is non-trivial without cv2; use placeholder for now
-                return self._placeholder_frame()
+                raise RuntimeError("Unsupported frame format (YUV) for capture_jpeg")
             buf = io.BytesIO()
             img.save(buf, format="JPEG", quality=self.quality)
             return buf.getvalue()
-        except Exception:
-            return self._placeholder_frame()
+        except Exception as e:
+            raise RuntimeError("Failed to encode JPEG from camera frame") from e
 
     def mjpeg_generator(self) -> Generator[bytes, None, None]:
         # multipart/x-mixed-replace generator yielding JPEG parts
@@ -194,13 +178,15 @@ class Camera:
 
         Avoids Picamera2 FfmpegOutput autodetection issues with URL sinks.
         """
-        if not _PICAM_AVAILABLE or self._picam is None:
+        if not _PICAM_AVAILABLE:
             logging.getLogger(__name__).warning("start_publisher: Picamera2 not available")
             return False
         with self._publish_lock:
             if self._publishing:
                 return True
             try:
+                # Ensure camera is open before starting encoder
+                self._ensure_open()
                 from picamera2.encoders import H264Encoder  # type: ignore
                 from picamera2.outputs import FileOutput  # type: ignore
                 import subprocess, shlex

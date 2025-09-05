@@ -1,9 +1,9 @@
-import { useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Activity, Camera as CameraIcon } from "lucide-react"
-import { API_BASE, VIDEO_MJPEG_ENDPOINT } from "./config"
+import { API_BASE, VIDEO_MJPEG_ENDPOINT, VIDEO_WHEP_ENDPOINT } from "./config"
 
 
 /**
@@ -25,7 +25,10 @@ import { API_BASE, VIDEO_MJPEG_ENDPOINT } from "./config"
  */
 export default function CameraPanel() {
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const pcRef = useRef<RTCPeerConnection | null>(null)
   const [active, setActive] = useState(false)
+  const [connecting, setConnecting] = useState(false)
+  const [streamTech, setStreamTech] = useState<"WebRTC" | "MJPEG" | "None">("None")
 
   /**
    * Start local demo mode using the device camera.
@@ -55,9 +58,100 @@ export default function CameraPanel() {
     s?.getTracks().forEach((t) => t.stop())
     if (v) v.srcObject = null
     setActive(false)
+    try {
+      pcRef.current?.close()
+    } catch {}
+    pcRef.current = null
+    setStreamTech("None")
   }
 
   const mjpegUrl = useMemo(() => API_BASE + VIDEO_MJPEG_ENDPOINT + `?t=${Date.now()}` , [])
+  const whepUrl = useMemo(() => API_BASE + VIDEO_WHEP_ENDPOINT, [])
+
+  const startWebRTC = async () => {
+    if (!whepUrl) return
+    if (pcRef.current) return
+    setConnecting(true)
+    try {
+      const pc = new RTCPeerConnection()
+      pcRef.current = pc
+
+      // Prepare a stream for the video element
+      const stream = new MediaStream()
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+      }
+      pc.addTransceiver("video", { direction: "recvonly" })
+      pc.ontrack = (ev) => {
+        stream.addTrack(ev.track)
+      }
+
+      // Create offer
+      const offer = await pc.createOffer()
+      await pc.setLocalDescription(offer)
+
+      // Wait for ICE gathering to complete (no trickle for simplicity)
+      await new Promise<void>((resolve) => {
+        if (pc.iceGatheringState === "complete") {
+          resolve()
+        } else {
+          const check = () => {
+            if (pc.iceGatheringState === "complete") {
+              pc.removeEventListener("icegatheringstatechange", check)
+              resolve()
+            }
+          }
+          pc.addEventListener("icegatheringstatechange", check)
+          // Fallback timeout
+          setTimeout(() => {
+            pc.removeEventListener("icegatheringstatechange", check)
+            resolve()
+          }, 1500)
+        }
+      })
+
+      const local = pc.localDescription
+      if (!local) throw new Error("No localDescription after createOffer")
+
+      // Send offer to WHEP endpoint
+      const resp = await fetch(whepUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/sdp" },
+        body: local.sdp || "",
+      })
+      if (!resp.ok) throw new Error(`WHEP POST failed: ${resp.status}`)
+      const answerSdp = await resp.text()
+      await pc.setRemoteDescription({ type: "answer", sdp: answerSdp })
+
+      // Start playing
+      if (videoRef.current) {
+        await videoRef.current.play()
+      }
+      setActive(true)
+      setStreamTech("WebRTC")
+    } catch {
+      // Reset state on error
+      try { pcRef.current?.close() } catch {}
+      pcRef.current = null
+      setActive(false)
+      setStreamTech("None")
+    } finally {
+      setConnecting(false)
+    }
+  }
+
+  // Auto-connect to WebRTC on mount if available
+  useEffect(() => {
+    if (whepUrl && !active && !connecting && !pcRef.current) {
+      // Fire and forget; internal guards prevent double-start
+      void startWebRTC()
+    }
+    // On unmount, ensure we stop any active stream
+    return () => {
+      stop()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   return (
     <Card className="h-full">
@@ -69,25 +163,44 @@ export default function CameraPanel() {
           <Badge variant="default" className="flex items-center gap-1">
             <Activity className="h-3 w-3" /> Live
           </Badge>
+          <Badge variant="outline">{streamTech}</Badge>
           <div className="flex gap-2">
-            {!active ? (
-              <Button size="sm" onClick={startLocalDemo}>
-                Demo Connect
-              </Button>
+            {VIDEO_WHEP_ENDPOINT ? (
+              !active ? (
+                <Button size="sm" onClick={startWebRTC} disabled={connecting}>
+                  {connecting ? "Connecting..." : "Connect"}
+                </Button>
+              ) : (
+                <Button size="sm" variant="secondary" onClick={stop}>
+                  Stop
+                </Button>
+              )
             ) : (
-              <Button size="sm" variant="secondary" onClick={stop}>
-                Stop
-              </Button>
+              !active ? (
+                <Button size="sm" onClick={startLocalDemo}>
+                  Demo Connect
+                </Button>
+              ) : (
+                <Button size="sm" variant="secondary" onClick={stop}>
+                  Stop
+                </Button>
+              )
             )}
           </div>
         </div>
       </CardHeader>
       <CardContent>
         <div className="aspect-video w-full overflow-hidden rounded-lg border bg-muted relative">
-          {/* Robot MJPEG feed */}
-          <img src={mjpegUrl} alt="Robot camera" className="absolute inset-0 h-full w-full object-cover" />
-          {/* Optional local demo overlay */}
-          <video ref={videoRef} className="absolute inset-0 h-full w-full object-cover" playsInline muted style={{ display: active ? 'block' : 'none' }} />
+          {whepUrl ? (
+            <video ref={videoRef} className="absolute inset-0 h-full w-full object-cover" playsInline muted />
+          ) : (
+            <>
+              {/* Robot MJPEG feed (fallback) */}
+              <img src={mjpegUrl} alt="Robot camera" className="absolute inset-0 h-full w-full object-cover" />
+              {/* Optional local demo overlay */}
+              <video ref={videoRef} className="absolute inset-0 h-full w-full object-cover" playsInline muted style={{ display: active ? 'block' : 'none' }} />
+            </>
+          )}
         </div>
       </CardContent>
     </Card>

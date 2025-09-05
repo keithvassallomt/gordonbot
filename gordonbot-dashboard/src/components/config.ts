@@ -5,7 +5,10 @@
  * Base URL for REST API calls.
  * Empty string means same-origin as dashboard.
  */
-export const API_BASE = "" // same-origin by default
+// During dev, backend is on 127.0.0.1:8000 and frontend on 127.0.0.1:5173
+// Point API_BASE to the backend to avoid 404s from the Vite dev server.
+// Override via Vite env: VITE_API_BASE="http://192.168.x.x:8000" for LAN testing.
+export const API_BASE = (import.meta as any).env?.VITE_API_BASE || "http://192.168.96.187:8000"
 /**
  * REST endpoint path for battery telemetry data.
  */
@@ -22,6 +25,13 @@ export const VIDEO_MJPEG_ENDPOINT = "/api/video/stream.mjpg"
  * Snapshot path for robot camera.
  */
 export const VIDEO_SNAPSHOT_ENDPOINT = "/api/video/snapshot.jpg"
+
+// MediaMTX WebRTC (WHEP) playback endpoint (proxied by backend)
+/**
+ * Path on the backend that proxies WHEP to MediaMTX, avoiding CORS.
+ * Combine with `API_BASE` when fetching.
+ */
+export const VIDEO_WHEP_ENDPOINT = "/api/video/whep/gordon"
 
 // Control transport (WebSocket path mounted on the robot)
 /**
