@@ -7,6 +7,13 @@ from typing import Generator, Optional
 import logging
 
 from PIL import Image  # type: ignore
+import numpy as np  # type: ignore
+try:
+    import cv2  # type: ignore
+    _CV_AVAILABLE = True
+except Exception:
+    cv2 = None  # type: ignore
+    _CV_AVAILABLE = False
 
 try:
     # Picamera2 is normally installed via apt: `sudo apt install -y python3-picamera2`
@@ -62,6 +69,13 @@ class Camera:
         self._publishing = False
         self._publish_lock = threading.Lock()
         self._ffmpeg_proc = None
+        # Annotated publishing state
+        self._annot_thread: Optional[threading.Thread] = None
+        self._annot_running = False
+        self._annot_lock = threading.Lock()
+        self._annot_ffmpeg_proc = None
+        # Simple motion detector (no weights needed)
+        self._bg = None
 
         # Defer opening Picamera2 until first use (capture or publisher)
         if not _PICAM_AVAILABLE:
@@ -245,6 +259,184 @@ class Camera:
                 pass
             self._ffmpeg_proc = None
             self._publishing = False
+
+    # ---- Annotated Publisher (OpenCV overlays -> RTSP via ffmpeg) -----------
+    def start_publisher_annotated(self, rtsp_url: str, fps: int = 10, bitrate: int = 1_500_000,
+                                  min_area: int = 600) -> bool:
+        """Publish annotated video to RTSP via ffmpeg.
+
+        - Reads latest RGB frames from Picamera2
+        - Runs light motion-based detection (background subtraction)
+        - Draws bounding boxes + labels with OpenCV
+        - Pipes raw BGR frames to ffmpeg which encodes to H.264 and pushes to RTSP
+
+        Args:
+            rtsp_url: Target RTSP URL (e.g., rtsp://127.0.0.1:8554/gordon-annot)
+            fps: Annotation/output frame rate
+            bitrate: Target encoder bitrate (bps)
+            min_area: Minimum bbox area (in downscaled space) to draw
+        """
+        if not _PICAM_AVAILABLE:
+            logging.getLogger(__name__).warning("annotated: Picamera2 not available")
+            return False
+        if not _CV_AVAILABLE:
+            logging.getLogger(__name__).warning("annotated: OpenCV not available (opencv-python-headless)")
+            return False
+        with self._annot_lock:
+            if self._annot_running:
+                return True
+            try:
+                self._ensure_open()
+                import subprocess
+                # ffmpeg reads raw BGR frames from stdin
+                w, h = self.width, self.height
+                cmd = [
+                    "ffmpeg", "-loglevel", "warning", "-re",
+                    "-f", "rawvideo",
+                    "-pix_fmt", "bgr24",
+                    "-s", f"{w}x{h}",
+                    "-r", str(fps),
+                    "-i", "-",
+                    # Encode (fallback to libx264 for broad compatibility)
+                    "-c:v", "libx264",
+                    "-preset", "veryfast",
+                    "-tune", "zerolatency",
+                    "-b:v", str(bitrate),
+                    "-maxrate", str(bitrate),
+                    "-bufsize", str(bitrate // 2),
+                    "-g", str(max(1, fps * 2)),
+                    "-rtsp_transport", "tcp",
+                    "-f", "rtsp",
+                    rtsp_url,
+                ]
+                proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                if not proc or not proc.stdin:
+                    logging.getLogger(__name__).error("annotated: failed to start ffmpeg subprocess")
+                    return False
+                self._annot_ffmpeg_proc = proc
+
+                # Init background subtractor on first run
+                if self._bg is None:
+                    self._bg = cv2.createBackgroundSubtractorKNN(dist2Threshold=400.0, detectShadows=False)
+
+                self._annot_running = True
+
+                def _loop() -> None:
+                    log = logging.getLogger(__name__)
+                    period = 1.0 / max(1, fps)
+                    last = 0.0
+                    while True:
+                        with self._annot_lock:
+                            if not self._annot_running:
+                                break
+                            proc_local = self._annot_ffmpeg_proc
+                        if proc_local is None or proc_local.poll() is not None:
+                            log.warning("annotated: ffmpeg exited; stopping thread")
+                            break
+                        # Pace
+                        now = time.time()
+                        if now - last < period:
+                            time.sleep(max(0.0, period - (now - last)))
+                        last = time.time()
+
+                        frame_rgb, is_rgb = self._latest_frame()
+                        if frame_rgb is None:
+                            continue
+                        try:
+                            # Ensure numpy array and convert RGB->BGR for OpenCV
+                            arr = np.asarray(frame_rgb)
+                            if getattr(arr, "ndim", 0) != 3 or arr.shape[2] != 3:
+                                continue
+                            # Convert to BGR view
+                            bgr = arr[:, :, ::-1].copy()
+
+                            # Detection on downscaled gray frame
+                            ds_w = 320
+                            scale = ds_w / bgr.shape[1]
+                            ds = cv2.resize(bgr, (ds_w, int(bgr.shape[0] * scale)), interpolation=cv2.INTER_AREA)
+                            gray = cv2.cvtColor(ds, cv2.COLOR_BGR2GRAY)
+                            fg = self._bg.apply(gray)
+                            # Clean up mask
+                            fg = cv2.morphologyEx(fg, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+                            fg = cv2.dilate(fg, np.ones((3, 3), np.uint8), iterations=1)
+                            contours, _ = cv2.findContours(fg, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                            # Draw boxes scaled to original image
+                            for cnt in contours:
+                                x, y, w0, h0 = cv2.boundingRect(cnt)
+                                area = w0 * h0
+                                if area < max(1, min_area):
+                                    continue
+                                # scale back to full-res coordinates
+                                x2 = int(x / scale)
+                                y2 = int(y / scale)
+                                w2 = int(w0 / scale)
+                                h2 = int(h0 / scale)
+                                cv2.rectangle(bgr, (x2, y2), (x2 + w2, y2 + h2), (0, 255, 0), 2)
+                                cv2.putText(bgr, "motion", (x2, max(0, y2 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
+                            # Timestamp overlay
+                            ts = time.strftime("%H:%M:%S")
+                            cv2.putText(bgr, ts, (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
+
+                            # Write raw BGR frame
+                            try:
+                                proc_local.stdin.write(bgr.tobytes())  # type: ignore[union-attr]
+                            except BrokenPipeError:
+                                log.warning("annotated: ffmpeg stdin closed")
+                                break
+                        except Exception as e:
+                            log.debug("annotated: frame processing error: %s", e)
+                            continue
+
+                    # Cleanup
+                    with self._annot_lock:
+                        try:
+                            if self._annot_ffmpeg_proc and self._annot_ffmpeg_proc.stdin:
+                                self._annot_ffmpeg_proc.stdin.close()
+                        except Exception:
+                            pass
+                        try:
+                            if self._annot_ffmpeg_proc:
+                                self._annot_ffmpeg_proc.terminate()
+                        except Exception:
+                            pass
+                        self._annot_ffmpeg_proc = None
+                        self._annot_running = False
+
+                th = threading.Thread(target=_loop, name="annot-publisher", daemon=True)
+                th.start()
+                self._annot_thread = th
+                logging.getLogger(__name__).info("Started annotated publisher to %s (fps=%s)", rtsp_url, fps)
+                return True
+            except FileNotFoundError:
+                logging.getLogger(__name__).error("annotated: ffmpeg not found; install it with 'sudo apt install -y ffmpeg'")
+                return False
+            except Exception as e:
+                logging.getLogger(__name__).exception("annotated: failed to start: %s", e)
+                # Best-effort cleanup
+                try:
+                    if self._annot_ffmpeg_proc:
+                        self._annot_ffmpeg_proc.kill()
+                except Exception:
+                    pass
+                self._annot_ffmpeg_proc = None
+                self._annot_running = False
+                return False
+
+    def stop_publisher_annotated(self) -> None:
+        with self._annot_lock:
+            self._annot_running = False
+            proc = self._annot_ffmpeg_proc
+        try:
+            if proc and proc.stdin:
+                proc.stdin.close()
+        except Exception:
+            pass
+        try:
+            if proc:
+                proc.terminate()
+        except Exception:
+            pass
+        self._annot_ffmpeg_proc = None
 
 
 # Singleton camera instance (1080p)

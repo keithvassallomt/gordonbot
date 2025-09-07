@@ -28,6 +28,10 @@ class Settings(BaseModel):
     verbose: bool = _getenv_bool("VERBOSE", False)
     camera_rtsp_url: str | None = os.getenv("CAMERA_RTSP_URL")
     camera_bitrate: int = int(os.getenv("CAMERA_BITRATE", "2000000"))
+    # Optional annotated stream publisher
+    camera_rtsp_annot_url: str | None = os.getenv("CAMERA_RTSP_ANNOT_URL")
+    annot_fps: int = int(os.getenv("ANNOT_FPS", "10"))
+    annot_min_area: int = int(os.getenv("ANNOT_MIN_AREA", "600"))  # min bbox area in downscaled space
     # Base URL for MediaMTX HTTP signaling. Can include or omit '/whep'.
     # Combined with MEDIAMTX_WHEP_STYLE to form the final target.
     mediamtx_whep_base: str = os.getenv("MEDIAMTX_WHEP_BASE", "http://127.0.0.1:8889/whep")

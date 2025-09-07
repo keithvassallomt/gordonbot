@@ -49,11 +49,24 @@ async def _start_streaming_if_configured() -> None:
     # Optionally publish to an RTSP server (e.g., MediaMTX) if configured
     if settings.camera_rtsp_url:
         camera.start_publisher(settings.camera_rtsp_url, bitrate=settings.camera_bitrate)
+    # Optional annotated stream publisher (OpenCV overlays)
+    if settings.camera_rtsp_annot_url:
+        try:
+            camera.start_publisher_annotated(
+                settings.camera_rtsp_annot_url,
+                fps=settings.annot_fps,
+                bitrate=min(settings.camera_bitrate, 2_000_000),
+                min_area=settings.annot_min_area,
+            )
+        except Exception:
+            # Avoid bringing down the app on annotation errors
+            pass
 
 
 @app.on_event("shutdown")
 async def _stop_streaming() -> None:
     camera.stop_publisher()
+    camera.stop_publisher_annotated()
 
 
 # Root-level WHEP proxy removed; use router-mounted endpoint under /api

@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Activity, Camera as CameraIcon } from "lucide-react"
-import { API_BASE, VIDEO_MJPEG_ENDPOINT, VIDEO_WHEP_ENDPOINT } from "./config"
+import { API_BASE, VIDEO_MJPEG_ENDPOINT, VIDEO_WHEP_BASE, VIDEO_WHEP_STREAM_RAW, VIDEO_WHEP_STREAM_ANNOT } from "./config"
 
 
 /**
@@ -29,6 +29,7 @@ export default function CameraPanel() {
   const [active, setActive] = useState(false)
   const [connecting, setConnecting] = useState(false)
   const [streamTech, setStreamTech] = useState<"WebRTC" | "MJPEG" | "None">("None")
+  const [streamKind, setStreamKind] = useState<"raw" | "annotated">("raw")
 
   /**
    * Start local demo mode using the device camera.
@@ -66,7 +67,10 @@ export default function CameraPanel() {
   }
 
   const mjpegUrl = useMemo(() => API_BASE + VIDEO_MJPEG_ENDPOINT + `?t=${Date.now()}` , [])
-  const whepUrl = useMemo(() => API_BASE + VIDEO_WHEP_ENDPOINT, [])
+  const whepUrl = useMemo(() => {
+    const stream = streamKind === "raw" ? VIDEO_WHEP_STREAM_RAW : VIDEO_WHEP_STREAM_ANNOT
+    return API_BASE + VIDEO_WHEP_BASE + stream
+  }, [streamKind])
 
   const startWebRTC = async () => {
     if (!whepUrl) return
@@ -153,6 +157,15 @@ export default function CameraPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // If stream kind changes while connected, restart the WebRTC session
+  useEffect(() => {
+    if (pcRef.current) {
+      stop()
+      void startWebRTC()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [streamKind])
+
   return (
     <Card className="h-full">
       <CardHeader className="flex flex-row items-center justify-between space-y-0">
@@ -164,8 +177,19 @@ export default function CameraPanel() {
             <Activity className="h-3 w-3" /> Live
           </Badge>
           <Badge variant="outline">{streamTech}</Badge>
+          <div className="flex items-center gap-1 rounded-md border px-2 py-1 text-xs">
+            <label className="mr-1">Stream</label>
+            <select
+              className="bg-transparent outline-none"
+              value={streamKind}
+              onChange={(e) => setStreamKind(e.target.value as "raw" | "annotated")}
+            >
+              <option value="raw">Raw</option>
+              <option value="annotated">Annotated</option>
+            </select>
+          </div>
           <div className="flex gap-2">
-            {VIDEO_WHEP_ENDPOINT ? (
+            {VIDEO_WHEP_BASE ? (
               !active ? (
                 <Button size="sm" onClick={startWebRTC} disabled={connecting}>
                   {connecting ? "Connecting..." : "Connect"}

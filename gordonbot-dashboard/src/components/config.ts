@@ -31,7 +31,12 @@ export const VIDEO_SNAPSHOT_ENDPOINT = "/api/video/snapshot.jpg"
  * Path on the backend that proxies WHEP to MediaMTX, avoiding CORS.
  * Combine with `API_BASE` when fetching.
  */
-export const VIDEO_WHEP_ENDPOINT = "/api/video/whep/gordon"
+/** Base path for WHEP proxy on backend. */
+export const VIDEO_WHEP_BASE = "/api/video/whep/"
+/** Stream name for raw camera feed. Must match MediaMTX stream. */
+export const VIDEO_WHEP_STREAM_RAW = "gordon"
+/** Stream name for annotated feed (overlays). Must match MediaMTX stream. */
+export const VIDEO_WHEP_STREAM_ANNOT = "gordon-annot"
 
 // Control transport (WebSocket path mounted on the robot)
 /**

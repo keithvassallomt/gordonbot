@@ -15,16 +15,31 @@ export default defineConfig({
     port: 5173,
     proxy: {
       // REST API → FastAPI
-      '/api': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
-      },
+      '/api': (() => {
+        const base = process.env.VITE_API_BASE || 'http://localhost:8000'
+        return {
+          target: base,
+          changeOrigin: true,
+        }
+      })(),
       // WebSocket → FastAPI
-      '/ws': {
-        target: 'ws://localhost:8000',
-        ws: true,
-        changeOrigin: true,
-      },
+      '/ws': (() => {
+        const base = process.env.VITE_API_BASE || 'http://localhost:8000'
+        // Derive ws/wss target from http/https base
+        let target = base
+        try {
+          const u = new URL(base)
+          const wsProto = u.protocol === 'https:' ? 'wss:' : 'ws:'
+          target = `${wsProto}//${u.host}`
+        } catch {
+          // keep as-is
+        }
+        return {
+          target,
+          ws: true,
+          changeOrigin: true,
+        }
+      })(),
     },
   },
 })

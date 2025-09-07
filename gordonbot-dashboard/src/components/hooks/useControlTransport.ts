@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react"
-import { CONTROL_WS_PATH } from "../config"
+import { API_BASE, CONTROL_WS_PATH } from "../config"
 import type { TransportStatus, ControlCommand } from "../types"
 
 /**
@@ -29,6 +29,17 @@ export function useControlTransport(path = CONTROL_WS_PATH) {
   const wsRef = useRef<WebSocket | null>(null)
 
   const resolveUrl = () => {
+    try {
+      // If API_BASE is absolute (http/https), derive ws(s) URL from it to avoid relying on dev proxy.
+      if (/^https?:\/\//i.test(API_BASE)) {
+        const api = new URL(API_BASE)
+        const wsScheme = api.protocol === "https:" ? "wss" : "ws"
+        return `${wsScheme}://${api.host}${path}`
+      }
+    } catch {
+      // fall back to window.location below
+    }
+    // Fallback: same-origin as the current page (useful when frontend is served by backend in prod)
     const { host, protocol } = window.location
     const scheme = protocol === "https:" ? "wss" : "ws"
     return `${scheme}://${host}${path}`
@@ -57,7 +68,24 @@ export function useControlTransport(path = CONTROL_WS_PATH) {
    * Close the WebSocket connection and reset state.
    */
   const disconnect = useCallback(() => {
-    wsRef.current?.close()
+    const ws = wsRef.current
+    if (!ws) {
+      setStatus("disconnected")
+      return
+    }
+
+    // In React 18 StrictMode, effects mount/unmount twice in dev. Closing a CONNECTING socket
+    // triggers a console error ("closed before connection is established"). To avoid that noise,
+    // if still CONNECTING, close immediately after it opens instead of during handshake.
+    if (ws.readyState === WebSocket.CONNECTING) {
+      const handleOpen = () => {
+        try { ws.close() } catch {}
+      }
+      ws.addEventListener("open", handleOpen, { once: true })
+    } else {
+      try { ws.close() } catch {}
+    }
+
     wsRef.current = null
     setStatus("disconnected")
   }, [])
