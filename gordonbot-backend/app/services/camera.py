@@ -266,7 +266,8 @@ class Camera:
         """Publish annotated video to RTSP via ffmpeg.
 
         - Reads latest RGB frames from Picamera2
-        - Runs light motion-based detection (background subtraction)
+        - Runs object detection if configured (OpenCV DNN ONNX);
+          falls back to motion-based detection if detector unavailable
         - Draws bounding boxes + labels with OpenCV
         - Pipes raw BGR frames to ffmpeg which encodes to H.264 and pushes to RTSP
 
@@ -288,6 +289,7 @@ class Camera:
             try:
                 self._ensure_open()
                 import subprocess
+                from app.core.config import settings
                 # ffmpeg reads raw BGR frames from stdin
                 w, h = self.width, self.height
                 cmd = [
@@ -315,7 +317,53 @@ class Camera:
                     return False
                 self._annot_ffmpeg_proc = proc
 
-                # Init background subtractor on first run
+                # Optional: initialize object detector if configured
+                detector = None
+                if getattr(settings, "detect_enabled", False) and settings.detect_onnx_path:
+                    try:
+                        net = cv2.dnn.readNetFromONNX(settings.detect_onnx_path)  # type: ignore[attr-defined]
+                        # Try to use preferable backend/target if available
+                        try:
+                            net.setPreferableBackend(getattr(cv2.dnn, "DNN_BACKEND_OPENCV", 3))
+                            net.setPreferableTarget(getattr(cv2.dnn, "DNN_TARGET_CPU", 0))
+                        except Exception:
+                            pass
+                        # Labels
+                        labels: list[str]
+                        if (settings.detect_labels or "").lower() == "coco":
+                            labels = [
+                                "person","bicycle","car","motorcycle","airplane","bus","train","truck","boat","traffic light",
+                                "fire hydrant","stop sign","parking meter","bench","bird","cat","dog","horse","sheep","cow",
+                                "elephant","bear","zebra","giraffe","backpack","umbrella","handbag","tie","suitcase","frisbee",
+                                "skis","snowboard","sports ball","kite","baseball bat","baseball glove","skateboard","surfboard","tennis racket","bottle",
+                                "wine glass","cup","fork","knife","spoon","bowl","banana","apple","sandwich","orange","broccoli","carrot","hot dog",
+                                "pizza","donut","cake","chair","couch","potted plant","bed","dining table","toilet","tv","laptop","mouse","remote",
+                                "keyboard","cell phone","microwave","oven","toaster","sink","refrigerator","book","clock","vase","scissors","teddy bear",
+                                "hair drier","toothbrush"
+                            ]
+                        else:
+                            try:
+                                with open(settings.detect_labels, "r", encoding="utf-8") as f:
+                                    labels = [ln.strip() for ln in f if ln.strip()]
+                            except Exception:
+                                labels = []
+                        detector = {
+                            "net": net,
+                            "labels": labels,
+                            "conf": float(getattr(settings, "detect_conf_threshold", 0.4)),
+                            "nms": float(getattr(settings, "detect_nms_threshold", 0.45)),
+                            "size": int(getattr(settings, "detect_input_size", 640)),
+                            "interval": max(1, int(getattr(settings, "detect_interval", 2))),
+                            "frame_index": 0,
+                            # Persisted detections drawn between inference frames
+                            "last": [],  # list[tuple[int,int,int,int,str,float]] as (x,y,w,h,label,conf)
+                        }
+                        logging.getLogger(__name__).info("annotated: ONNX detector loaded from %s", settings.detect_onnx_path)
+                    except Exception as e:
+                        detector = None
+                        logging.getLogger(__name__).warning("annotated: failed to load detector (%s); falling back to motion", e)
+
+                # Init background subtractor on first run (used if no detector)
                 if self._bg is None:
                     self._bg = cv2.createBackgroundSubtractorKNN(dist2Threshold=400.0, detectShadows=False)
 
@@ -347,32 +395,116 @@ class Camera:
                             arr = np.asarray(frame_rgb)
                             if getattr(arr, "ndim", 0) != 3 or arr.shape[2] != 3:
                                 continue
-                            # Convert to BGR view
-                            bgr = arr[:, :, ::-1].copy()
+                            # Convert to BGR for OpenCV/ffmpeg. Some platforms deliver RGB888 as BGR in memory.
+                            # Reuse the same swap flag semantics as capture_jpeg():
+                            # - If self._swap_rb is true, incoming is likely BGR → keep as-is for OpenCV.
+                            # - Else incoming is RGB → swap to BGR.
+                            try:
+                                if self._swap_rb and getattr(arr, "ndim", 0) == 3 and arr.shape[2] == 3:
+                                    bgr = arr.copy()
+                                else:
+                                    bgr = arr[:, :, ::-1].copy()
+                            except Exception:
+                                bgr = arr.copy()
 
-                            # Detection on downscaled gray frame
-                            ds_w = 320
-                            scale = ds_w / bgr.shape[1]
-                            ds = cv2.resize(bgr, (ds_w, int(bgr.shape[0] * scale)), interpolation=cv2.INTER_AREA)
-                            gray = cv2.cvtColor(ds, cv2.COLOR_BGR2GRAY)
-                            fg = self._bg.apply(gray)
-                            # Clean up mask
-                            fg = cv2.morphologyEx(fg, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
-                            fg = cv2.dilate(fg, np.ones((3, 3), np.uint8), iterations=1)
-                            contours, _ = cv2.findContours(fg, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                            # Draw boxes scaled to original image
-                            for cnt in contours:
-                                x, y, w0, h0 = cv2.boundingRect(cnt)
-                                area = w0 * h0
-                                if area < max(1, min_area):
-                                    continue
-                                # scale back to full-res coordinates
-                                x2 = int(x / scale)
-                                y2 = int(y / scale)
-                                w2 = int(w0 / scale)
-                                h2 = int(h0 / scale)
-                                cv2.rectangle(bgr, (x2, y2), (x2 + w2, y2 + h2), (0, 255, 0), 2)
-                                cv2.putText(bgr, "motion", (x2, max(0, y2 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
+                            drawn = False
+                            if detector is not None:
+                                # Run ONNX detector every N frames
+                                detector["frame_index"] += 1
+                                run_det = (detector["frame_index"] % detector["interval"]) == 0
+                                if run_det:
+                                    size = detector["size"]
+                                    blob = cv2.dnn.blobFromImage(bgr, scalefactor=1/255.0, size=(size, size), swapRB=True, crop=False)
+                                    net = detector["net"]
+                                    net.setInput(blob)
+                                    try:
+                                        out = net.forward()
+                                    except Exception as e:
+                                        logging.getLogger(__name__).debug("annotated: detector forward error: %s", e)
+                                        out = None
+                                    if out is not None:
+                                        # Expected shape: (1, N, 85) for YOLOv5-like models
+                                        out = np.squeeze(out)
+                                        if out.ndim == 1:
+                                            out = np.expand_dims(out, axis=0)
+                                        boxes: list[list[int]] = []
+                                        scores: list[float] = []
+                                        class_ids: list[int] = []
+                                        ih, iw = bgr.shape[:2]
+                                        for row in out:
+                                            if row.shape[0] < 85:
+                                                # Not a YOLOv5-like output; skip
+                                                continue
+                                            obj_conf = float(row[4])
+                                            class_scores = row[5:]
+                                            class_id = int(np.argmax(class_scores))
+                                            class_conf = float(class_scores[class_id])
+                                            conf = obj_conf * class_conf
+                                            if conf < detector["conf"]:
+                                                continue
+                                            cx, cy, w0, h0 = row[0], row[1], row[2], row[3]
+                                            # Model outputs are relative to input size when using blobFromImage with size (size,size)
+                                            # Convert to pixel coords of original image
+                                            x = int((cx - w0 / 2) * iw / size)
+                                            y = int((cy - h0 / 2) * ih / size)
+                                            w_box = int(w0 * iw / size)
+                                            h_box = int(h0 * ih / size)
+                                            boxes.append([max(0, x), max(0, y), max(1, w_box), max(1, h_box)])
+                                            scores.append(conf)
+                                            class_ids.append(class_id)
+                                        # NMS
+                                        idxs = []
+                                        if boxes:
+                                            idxs = cv2.dnn.NMSBoxes(boxes, scores, detector["conf"], detector["nms"])  # type: ignore[attr-defined]
+                                            if isinstance(idxs, tuple) or isinstance(idxs, np.ndarray):
+                                                idxs = list(np.array(idxs).reshape(-1))
+                                            elif isinstance(idxs, list):
+                                                idxs = [int(i) for i in idxs]
+                                        # Persist and draw
+                                        det_list: list[tuple[int,int,int,int,str,float]] = []
+                                        for i in idxs or []:
+                                            x, y, w_box, h_box = boxes[i]
+                                            cls = class_ids[i]
+                                            conf = scores[i]
+                                            label = detector["labels"][cls] if 0 <= cls < len(detector["labels"]) else str(cls)
+                                            det_list.append((x, y, w_box, h_box, label, conf))
+                                        detector["last"] = det_list
+                                        # Draw latest detections immediately
+                                        for (x, y, w_box, h_box, label, conf) in det_list:
+                                            cv2.rectangle(bgr, (x, y), (x + w_box, y + h_box), (0, 140, 255), 2)
+                                            cv2.putText(bgr, f"{label} {conf:.2f}", (x, max(0, y - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 140, 255), 2, cv2.LINE_AA)
+                                            drawn = True
+                                else:
+                                    # Not running detector this frame: draw last known detections
+                                    last_dets = detector.get("last") or []
+                                    for (x, y, w_box, h_box, label, conf) in last_dets:
+                                        cv2.rectangle(bgr, (x, y), (x + w_box, y + h_box), (0, 140, 255), 2)
+                                        cv2.putText(bgr, f"{label} {conf:.2f}", (x, max(0, y - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 140, 255), 2, cv2.LINE_AA)
+                                    drawn = drawn or bool(last_dets)
+                            if not drawn:
+                                # Fallback: motion detection on downscaled gray frame
+                                ds_w = 320
+                                scale = ds_w / bgr.shape[1]
+                                ds = cv2.resize(bgr, (ds_w, int(bgr.shape[0] * scale)), interpolation=cv2.INTER_AREA)
+                                gray = cv2.cvtColor(ds, cv2.COLOR_BGR2GRAY)
+                                fg = self._bg.apply(gray)
+                                # Clean up mask
+                                fg = cv2.morphologyEx(fg, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+                                fg = cv2.dilate(fg, np.ones((3, 3), np.uint8), iterations=1)
+                                contours, _ = cv2.findContours(fg, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                                # Draw boxes scaled to original image
+                                for cnt in contours:
+                                    x, y, w0, h0 = cv2.boundingRect(cnt)
+                                    area = w0 * h0
+                                    if area < max(1, min_area):
+                                        continue
+                                    # scale back to full-res coordinates
+                                    x2 = int(x / scale)
+                                    y2 = int(y / scale)
+                                    w2 = int(w0 / scale)
+                                    h2 = int(h0 / scale)
+                                    cv2.rectangle(bgr, (x2, y2), (x2 + w2, y2 + h2), (0, 255, 0), 2)
+                                    cv2.putText(bgr, "motion", (x2, max(0, y2 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
                             # Timestamp overlay
                             ts = time.strftime("%H:%M:%S")
                             cv2.putText(bgr, ts, (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)

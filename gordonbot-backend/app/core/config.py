@@ -52,6 +52,19 @@ class Settings(BaseModel):
         # Default: allow common private/LAN dev hosts
         r"^https?://(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+)(:\d+)?$",
     )
+    # Object detection (OpenCV DNN) for annotated stream
+    detect_enabled: bool = _getenv_bool("DETECT_ENABLED", False)
+    # Path to an ONNX object detection model (e.g. YOLOv5/8). If unset, motion detection is used.
+    detect_onnx_path: str | None = os.getenv("DETECT_ONNX_PATH")
+    # Class labels: 'coco' for built-in COCO80, or path to a labels.txt (one label per line)
+    detect_labels: str = os.getenv("DETECT_LABELS", "coco")
+    # Confidence and NMS thresholds
+    detect_conf_threshold: float = float(os.getenv("DETECT_CONF_THRESHOLD", "0.40"))
+    detect_nms_threshold: float = float(os.getenv("DETECT_NMS_THRESHOLD", "0.45"))
+    # Model input square size (e.g., 640 for YOLOv5/8). Adjust to match your model.
+    detect_input_size: int = int(os.getenv("DETECT_INPUT_SIZE", "640"))
+    # Run detection every N frames to reduce CPU (>=1; 1 = every frame)
+    detect_interval: int = max(1, int(os.getenv("DETECT_INTERVAL", "2")))
 
 # Simple settings instance (expand later for env vars)
 settings = Settings()
