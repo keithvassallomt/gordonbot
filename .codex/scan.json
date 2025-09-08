@@ -1,0 +1,170 @@
+{
+  "backend": {
+    "api_prefix": "/api",
+    "env": {
+      "ANNOT_FPS": "10",
+      "ANNOT_MIN_AREA": "600",
+      "CAMERA_BITRATE": "2000000",
+      "CAMERA_RTSP_ANNOT_URL": "rtsp://127.0.0.1:8554/gordon-annot",
+      "CAMERA_RTSP_URL": "rtsp://127.0.0.1:8554/gordon",
+      "DETECT_CONF_THRESHOLD": "0.40",
+      "DETECT_ENABLED": "true",
+      "DETECT_INPUT_SIZE": "640",
+      "DETECT_INTERVAL": "2",
+      "DETECT_LABELS": "coco",
+      "DETECT_NMS_THRESHOLD": "0.45",
+      "DETECT_ONNX_PATH": "/home/keith/gordonbot/gordonbot-backend/models/yolov5n.onnx",
+      "MEDIAMTX_WHEP_BASE": "http://127.0.0.1:8889/whep",
+      "MEDIAMTX_WHEP_STYLE": "suffix",
+      "VERBOSE": "false"
+    },
+    "requirements_file": "gordonbot-backend/requirements.txt",
+    "routes": [
+      {
+        "file": "gordonbot-backend/app/routers/battery.py",
+        "function": "battery_status",
+        "method": "GET",
+        "path": "/api/battery/status"
+      },
+      {
+        "file": "gordonbot-backend/app/routers/diagnostics.py",
+        "function": "system_diagnostics",
+        "method": "GET",
+        "path": "/api/diag/system"
+      },
+      {
+        "file": "gordonbot-backend/app/routers/ping.py",
+        "function": "ping",
+        "method": "GET",
+        "path": "/api/ping"
+      },
+      {
+        "file": "gordonbot-backend/app/routers/video.py",
+        "function": "snapshot_jpg",
+        "method": "GET",
+        "path": "/api/video/snapshot.jpg"
+      },
+      {
+        "file": "gordonbot-backend/app/routers/video.py",
+        "function": "whep_offer",
+        "method": "POST",
+        "path": "/api/video/whep/{stream}"
+      },
+      {
+        "file": "gordonbot-backend/app/routers/video.py",
+        "function": "whep_options",
+        "method": "OPTIONS",
+        "path": "/api/video/whep/{stream}"
+      }
+    ],
+    "websockets": [
+      {
+        "file": "gordonbot-backend/app/sockets/control.py",
+        "inferred": true,
+        "path": "/ws/control"
+      }
+    ]
+  },
+  "frontend": {
+    "dependencies": {
+      "@radix-ui/react-collapsible": "^1.1.12",
+      "@radix-ui/react-dropdown-menu": "^2.1.16",
+      "@radix-ui/react-progress": "^1.1.7",
+      "@radix-ui/react-separator": "^1.1.7",
+      "@radix-ui/react-slot": "^1.2.3",
+      "@radix-ui/react-tabs": "^1.1.13",
+      "@radix-ui/react-tooltip": "^1.2.8",
+      "@tailwindcss/vite": "^4.1.12",
+      "class-variance-authority": "^0.7.1",
+      "clsx": "^2.1.1",
+      "lucide-react": "^0.541.0",
+      "react": "^19.1.1",
+      "react-dom": "^19.1.1",
+      "tailwind-merge": "^3.3.1",
+      "tailwindcss": "^4.1.12"
+    },
+    "devDependencies": {
+      "@eslint/js": "^9.33.0",
+      "@types/node": "^24.3.0",
+      "@types/react": "^19.1.10",
+      "@types/react-dom": "^19.1.7",
+      "@vitejs/plugin-react": "^5.0.0",
+      "eslint": "^9.33.0",
+      "eslint-import-resolver-typescript": "^4.4.4",
+      "eslint-plugin-import": "^2.32.0",
+      "eslint-plugin-react-hooks": "^5.2.0",
+      "eslint-plugin-react-refresh": "^0.4.20",
+      "globals": "^16.3.0",
+      "prettier": "^3.6.2",
+      "stylelint": "^16.23.1",
+      "stylelint-config-standard": "^39.0.0",
+      "stylelint-config-tailwindcss": "^1.0.0",
+      "tailwindcss-animate": "^1.0.7",
+      "typescript": "~5.8.3",
+      "typescript-eslint": "^8.39.1",
+      "vite": "^7.1.2"
+    },
+    "env_example": {
+      "VITE_API_BASE": "http://127.0.0.1:8000"
+    },
+    "scripts": {
+      "build": "tsc -b && vite build",
+      "check": "npm run typecheck && npm run lint && npm run lint:css",
+      "dev": "vite",
+      "dev:host": "vite --host",
+      "format": "prettier --write \"src/**/*.{ts,tsx,css,json,md}\"",
+      "lint": "eslint .",
+      "lint:css": "stylelint \"src/**/*.css\"",
+      "preview": "vite preview",
+      "preview:host": "vite preview --host",
+      "typecheck": "tsc -b --noEmit"
+    }
+  },
+  "media": {
+    "rtsp": {
+      "env": [
+        "CAMERA_RTSP_URL",
+        "CAMERA_RTSP_ANNOT_URL",
+        "CAMERA_BITRATE"
+      ]
+    },
+    "whep": {
+      "mediamtx_env": [
+        "MEDIAMTX_WHEP_BASE",
+        "MEDIAMTX_WHEP_STYLE"
+      ],
+      "proxy_base_path": "/api/video/whep/",
+      "streams": [
+        "gordon",
+        "gordon-annot"
+      ]
+    }
+  },
+  "project": {
+    "name": "GordonBot",
+    "root": "/home/keith/gordonbot"
+  },
+  "runtime": {
+    "entrypoints": {
+      "backend": {
+        "command": "uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload",
+        "cwd": "gordonbot-backend",
+        "module": "app.main:app"
+      },
+      "frontend": {
+        "command": "npm run dev:host",
+        "cwd": "gordonbot-dashboard"
+      }
+    },
+    "ports": {
+      "backend": 8000,
+      "frontend": 5173,
+      "mediamtx_http": 8889,
+      "mediamtx_rtsp": 8554
+    }
+  },
+  "scripts": {
+    "bootstrap": "bash scripts/bootstrap.sh",
+    "dev": "bash scripts/dev.sh"
+  }
+}

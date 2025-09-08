@@ -44,3 +44,14 @@ tasks:
     run: npm run build
     cwd: gordonbot-dashboard
 
+  project:describe:
+    desc: Print high-level architecture summary
+    run: sed -n '1,240p' docs/ARCHITECTURE.md
+
+  project:index:
+    desc: Generate machine-readable index at .codex/scan.json
+    run: python3 scripts/project_index.py > .codex/scan.json && echo 'Wrote .codex/scan.json'
+
+  project:open:
+    desc: Pretty-print the current .codex/scan.json
+    run: python3 -c 'import json,sys; print(json.dumps(json.load(open(".codex/scan.json")), indent=2, sort_keys=True))'
