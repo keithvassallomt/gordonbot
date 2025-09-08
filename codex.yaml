@@ -1,0 +1,46 @@
+name: gordonbot
+description: Developer tasks for GordonBot (backend FastAPI + Vite dashboard)
+
+# Common dev tasks you can run with Codex CLI or as reference commands
+tasks:
+  setup:
+    desc: Create backend venv and install backend/frontend deps
+    run: bash scripts/bootstrap.sh
+
+  dev:
+    desc: Run backend (Uvicorn) and frontend (Vite) with a TUI supervisor
+    run: bash scripts/dev.sh
+
+  backend:dev:
+    desc: Run FastAPI backend with auto-reload on port 8000
+    run: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    cwd: gordonbot-backend
+    env_files:
+      - gordonbot-backend/.env
+
+  backend:install:
+    desc: Create/refresh backend venv and install requirements
+    run: |
+      python3 -m venv .venv && \
+      . .venv/bin/activate && \
+      python -m pip install --upgrade pip && \
+      pip install -r requirements.txt
+    cwd: gordonbot-backend
+
+  frontend:dev:
+    desc: Run Vite dev server on host (port 5173)
+    run: npm run dev:host
+    cwd: gordonbot-dashboard
+    env_files:
+      - gordonbot-dashboard/.env
+
+  frontend:install:
+    desc: Install dashboard dependencies with npm ci
+    run: npm ci
+    cwd: gordonbot-dashboard
+
+  frontend:build:
+    desc: Build dashboard (Vite)
+    run: npm run build
+    cwd: gordonbot-dashboard
+
