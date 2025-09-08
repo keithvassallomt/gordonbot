@@ -79,4 +79,43 @@ export type BatteryData = {
 export type DiagnosticsData = {
   cpu_load: number // 0..100
   cpu_temperature?: number // Celsius
-} 
+}
+
+// Sensors domain
+export type EncoderData = {
+  connected?: boolean
+  ticks?: number
+  distance_m?: number
+  distance_mm?: number
+  rpm?: number
+  speed_mm_s?: number
+}
+
+export type MotorEncoders = {
+  left?: EncoderData
+  right?: EncoderData
+}
+
+export type Vector3 = { x?: number; y?: number; z?: number }
+export type Quaternion = { w?: number; x?: number; y?: number; z?: number }
+export type EulerDeg = { roll?: number; pitch?: number; yaw?: number }
+
+export type BNO055Data = {
+  euler?: EulerDeg
+  quat?: Quaternion
+  ang_vel_rad_s?: Vector3
+  accel_m_s2?: Vector3
+  mag_uT?: Vector3
+  lin_accel_m_s2?: Vector3
+  gravity_m_s2?: Vector3
+  temp_c?: number
+}
+
+export type ToFData = { distance_mm?: number }
+
+export type SensorsStatus = {
+  ts: number
+  encoders?: MotorEncoders
+  tof?: ToFData
+  bno055?: BNO055Data
+}

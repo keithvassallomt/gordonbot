@@ -2,6 +2,7 @@ from __future__ import annotations
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.core.config import settings
 from app.schemas import DriveMessage
+from app.services.drive_state import set_drive as _set_drive_state
 import asyncio
 import time
 import logging
@@ -141,8 +142,9 @@ async def ws_control(ws: WebSocket):
             shaped_right = shape(right)
             log.debug("drive: raw=(%.3f, %.3f) shaped=(%.3f, %.3f) ts=%s", left, right, shaped_left, shaped_right, _ts)
 
-            # Drive motors
+            # Drive motors and update shared drive state for encoder direction
             _motors.set(left=shaped_left, right=shaped_right)
+            _set_drive_state(shaped_left, shaped_right)
             last_cmd["t"] = time.monotonic()
 
             # Ack back to client (useful for latency/telemetry)

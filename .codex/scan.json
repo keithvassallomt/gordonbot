@@ -39,6 +39,12 @@
         "path": "/api/ping"
       },
       {
+        "file": "gordonbot-backend/app/routers/sensors.py",
+        "function": "sensors_status",
+        "method": "GET",
+        "path": "/api/sensors/status"
+      },
+      {
         "file": "gordonbot-backend/app/routers/video.py",
         "function": "snapshot_jpg",
         "method": "GET",

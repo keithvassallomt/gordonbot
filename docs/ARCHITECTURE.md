@@ -85,6 +85,7 @@ Entrypoint: `gordonbot-backend/app/main.py`
 - `GET /api/diag/system` → JSON with CPU, memory, temps, uptime, throttling, etc.
 - `GET /api/video/snapshot.jpg` → current JPEG frame from the camera.
 - `POST /api/video/whep/{stream}` → Proxies `application/sdp` offer to MediaMTX, returns `application/sdp` answer. CORS preflight supported via `OPTIONS`.
+- `GET /api/sensors/status` → Consolidated sensor snapshot (encoders, ToF, BNO055). Optional fields if hardware absent.
 
 ### WebSocket: `/ws/control`
 
@@ -138,9 +139,17 @@ Defined in `gordonbot-backend/app/core/config.py` and `gordonbot-backend/.env`.
 - Env (`gordonbot-dashboard/.env`): `VITE_API_BASE` → backend base URL, e.g., `http://127.0.0.1:8000`.
 - Key modules:
   - `components/config.ts`: constants including `VIDEO_WHEP_BASE = "/api/video/whep/"`, streams `gordon` and `gordon-annot`.
-  - `CameraPanel.tsx`: snapshot endpoint and WHEP WebRTC playback via backend proxy.
+- `CameraPanel.tsx`: snapshot endpoint and WHEP WebRTC playback via backend proxy.
+- `SensorsPanel.tsx`: polls `/api/sensors/status` and displays encoders, ToF, and BNO055 telemetry.
   - `ControlPanel.tsx`: joystick + keyboard → WebSocket `/ws/control` client.
   - `DiagnosticsPanel.tsx`: queries `GET /api/diag/system` and displays metrics.
+
+### Encoders
+
+- Hardware: Pololu micro metal gearmotor with integrated 2‑channel Hall encoder (12 CPR on motor shaft) with ~100:1 gearbox → ~1204 counts per output shaft revolution.
+- Wiring (first encoder): Channel A → GPIO 17, Channel B → GPIO 27.
+- Backend: `services/encoder.py` uses `gpiozero.RotaryEncoder` if available; exposed via `GET /api/sensors/status` in `encoders.left` with fields `ticks`, `distance_m`, and `rpm`.
+- Calibration: `ENCODER_COUNTS_PER_REV_OUTPUT` (default `1204`) and `WHEEL_DIAMETER_M` (default `0.03`) in backend `.env`.
 
 ## Dev, Build, and Run
 
@@ -187,4 +196,3 @@ npm run dev:host
 - WebSocket: `ws://127.0.0.1:8000/ws/control`
 - Snapshot: `GET /api/video/snapshot.jpg`
 - WHEP proxy: `POST /api/video/whep/{gordon|gordon-annot}` (Content‑Type: `application/sdp`)
-

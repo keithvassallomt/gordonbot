@@ -66,5 +66,22 @@ class Settings(BaseModel):
     # Run detection every N frames to reduce CPU (>=1; 1 = every frame)
     detect_interval: int = max(1, int(os.getenv("DETECT_INTERVAL", "2")))
 
+    # Encoders / odometry (defaults based on Pololu 100:1 + 12 CPR motor encoder)
+    # The Pololu example suggests ~1204 counts per gearbox output revolution for 100:1.
+    encoder_counts_per_rev_output: int = int(os.getenv("ENCODER_COUNTS_PER_REV_OUTPUT", "1204"))
+    # Wheel diameter in meters (front drive wheel, 3 cm)
+    wheel_diameter_m: float = float(os.getenv("WHEEL_DIAMETER_M", "0.03"))
+    # Encoder GPIO pins (BCM) for left/right motors (Channel A/B)
+    encoder_left_a: int = int(os.getenv("ENCODER_LEFT_A", "12"))
+    encoder_left_b: int = int(os.getenv("ENCODER_LEFT_B", "27"))
+    encoder_right_a: int = int(os.getenv("ENCODER_RIGHT_A", "22"))
+    encoder_right_b: int = int(os.getenv("ENCODER_RIGHT_B", "26"))
+    # Optional empirical scales to correct for slip / effective pitch diameter
+    encoder_scale_fwd: float = float(os.getenv("ENCODER_SCALE_FWD", "1.024"))
+    encoder_scale_rev: float = float(os.getenv("ENCODER_SCALE_REV", "1.068"))
+    # Optional per-motor overrides; if unset, left scales apply to right as well
+    encoder_scale_fwd_right: float = float(os.getenv("ENCODER_SCALE_FWD_RIGHT", os.getenv("ENCODER_SCALE_FWD", "1.024")))
+    encoder_scale_rev_right: float = float(os.getenv("ENCODER_SCALE_REV_RIGHT", os.getenv("ENCODER_SCALE_REV", "1.068")))
+
 # Simple settings instance (expand later for env vars)
 settings = Settings()

@@ -26,6 +26,9 @@ export const VIDEO_MJPEG_ENDPOINT = "/api/video/stream.mjpg"
  */
 export const VIDEO_SNAPSHOT_ENDPOINT = "/api/video/snapshot.jpg"
 
+/** Sensors status endpoint */
+export const SENSORS_ENDPOINT = "/api/sensors/status"
+
 // MediaMTX WebRTC (WHEP) playback endpoint (proxied by backend)
 /**
  * Path on the backend that proxies WHEP to MediaMTX, avoiding CORS.

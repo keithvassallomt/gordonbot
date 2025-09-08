@@ -40,3 +40,52 @@ class DrivePayload(BaseModel):
 class DriveMessage(BaseModel):
     type: str
     payload: DrivePayload
+
+# ---- Sensors ----------------------------------------------------------------
+
+class EncoderData(BaseModel):
+    connected: Optional[bool] = None
+    ticks: Optional[int] = None
+    distance_m: Optional[float] = None
+    distance_mm: Optional[float] = None
+    rpm: Optional[float] = None
+    speed_mm_s: Optional[float] = None
+
+class MotorEncoders(BaseModel):
+    left: Optional[EncoderData] = None
+    right: Optional[EncoderData] = None
+
+class Vector3(BaseModel):
+    x: Optional[float] = None
+    y: Optional[float] = None
+    z: Optional[float] = None
+
+class Quaternion(BaseModel):
+    w: Optional[float] = None
+    x: Optional[float] = None
+    y: Optional[float] = None
+    z: Optional[float] = None
+
+class EulerDeg(BaseModel):
+    roll: Optional[float] = None
+    pitch: Optional[float] = None
+    yaw: Optional[float] = None
+
+class BNO055Data(BaseModel):
+    euler: Optional[EulerDeg] = None  # degrees
+    quat: Optional[Quaternion] = None  # unit quaternion
+    ang_vel_rad_s: Optional[Vector3] = None
+    accel_m_s2: Optional[Vector3] = None
+    mag_uT: Optional[Vector3] = None
+    lin_accel_m_s2: Optional[Vector3] = None
+    gravity_m_s2: Optional[Vector3] = None
+    temp_c: Optional[float] = None
+
+class ToFData(BaseModel):
+    distance_mm: Optional[int] = None
+
+class SensorsStatus(BaseModel):
+    ts: int
+    encoders: Optional[MotorEncoders] = None
+    tof: Optional[ToFData] = None
+    bno055: Optional[BNO055Data] = None
