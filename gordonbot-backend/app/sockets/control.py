@@ -10,12 +10,7 @@ import contextlib
 
 router = APIRouter()
 
-# Basic console logging during bring-up (only if not already configured)
-if not logging.getLogger().handlers:
-    logging.basicConfig(
-        level=logging.DEBUG if settings.verbose else logging.INFO,
-        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-    )
+log = logging.getLogger(__name__)
 
 # --- Hardware abstraction layer (safe to run on dev machines) ---
 try:
@@ -87,7 +82,6 @@ _motors = MotorController()
 @router.websocket(settings.control_ws_path)
 async def ws_control(ws: WebSocket):
     await ws.accept()
-    log = logging.getLogger(__name__)
     log.info("WS connected to %s", settings.control_ws_path)
 
     # Dead-man timer: stop if no command within this window

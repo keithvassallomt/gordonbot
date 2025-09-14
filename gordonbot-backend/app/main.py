@@ -1,4 +1,6 @@
 from __future__ import annotations
+import logging
+import logging.config
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -11,6 +13,41 @@ from app.routers import video as video_router
 from app.routers import sensors as sensors_router
 from app.sockets import control as control_socket
 from app.services.camera import camera
+
+def _setup_logging() -> None:
+    # Configure a consistent console logger for the backend and uvicorn
+    # Format: time level [backend] [logger] message
+    fmt = "%(asctime)s %(levelname)s [backend] [%(name)s] %(message)s"
+    config = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "standard": {"format": fmt},
+        },
+        "handlers": {
+            "console": {
+                "class": "logging.StreamHandler",
+                "level": "DEBUG" if settings.verbose else "INFO",
+                "formatter": "standard",
+                "stream": "ext://sys.stdout",
+            },
+        },
+        "loggers": {
+            # Uvicorn server and access logs
+            "uvicorn": {"handlers": ["console"], "level": "INFO", "propagate": False},
+            "uvicorn.error": {"handlers": ["console"], "level": "INFO", "propagate": False},
+            "uvicorn.access": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        },
+        "root": {"handlers": ["console"], "level": "DEBUG" if settings.verbose else "INFO"},
+    }
+    try:
+        logging.config.dictConfig(config)
+    except Exception:  # pragma: no cover
+        # Last resort fallback
+        logging.basicConfig(level=logging.DEBUG if settings.verbose else logging.INFO, format=fmt)
+
+
+_setup_logging()
 
 app = FastAPI(title="GordonBot Backend", version="0.1.0")
 

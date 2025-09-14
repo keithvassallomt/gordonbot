@@ -6,8 +6,11 @@ import threading
 from typing import Generator, Optional
 import logging
 
+import logging
 from PIL import Image  # type: ignore
 import numpy as np  # type: ignore
+log = logging.getLogger(__name__)
+
 try:
     import cv2  # type: ignore
     _CV_AVAILABLE = True
@@ -22,7 +25,6 @@ try:
 except Exception as e:
     # Common case on Raspberry Pi when using a venv: apt packages live in
     # /usr/lib/python3/dist-packages and are not visible to the venv by default.
-    log = logging.getLogger(__name__)
     log.info("Picamera2 import failed in venv: %s — trying system dist-packages", e)
     try:
         import sys, os
@@ -116,14 +118,16 @@ class Camera:
                             self._last_frame_main = arr_main
                         except Exception:
                             pass
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log.debug("camera post_callback error: %s", e)
 
                 cam.post_callback = _on_frame  # type: ignore
                 cam.start()
                 self._picam = cam
+                log.info("Picamera2 started with main=%dx%d, lores=%dx%d", self.width, self.height, max(160, self.width // 4), max(120, self.height // 4))
             except Exception as e:
                 self._picam = None
+                log.error("Failed to initialize Picamera2: %s", e)
                 raise RuntimeError("Failed to initialize Picamera2") from e
 
     def _latest_frame(self):
@@ -159,6 +163,7 @@ class Camera:
         # Use latest frame if available; otherwise raise to surface issues
         frame, is_rgb = self._latest_frame()
         if frame is None:
+            log.error("capture_jpeg: no frame available from camera")
             raise RuntimeError("No frame available from camera")
         try:
             if is_rgb:
@@ -176,6 +181,7 @@ class Camera:
             img.save(buf, format="JPEG", quality=self.quality)
             return buf.getvalue()
         except Exception as e:
+            log.error("capture_jpeg: failed to encode JPEG: %s", e)
             raise RuntimeError("Failed to encode JPEG from camera frame") from e
 
     def mjpeg_generator(self) -> Generator[bytes, None, None]:
@@ -216,21 +222,21 @@ class Camera:
                     cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
                 )
                 if not self._ffmpeg_proc or not self._ffmpeg_proc.stdin:
-                    logging.getLogger(__name__).error("Failed to start ffmpeg subprocess for RTSP publish")
+                    log.error("Failed to start ffmpeg subprocess for RTSP publish")
                     return False
 
                 encoder = H264Encoder(bitrate=bitrate)
                 sink = FileOutput(self._ffmpeg_proc.stdin)
                 self._picam.start_recording(encoder, sink, name="main")
                 self._publishing = True
-                logging.getLogger(__name__).info("Started publishing to %s", rtsp_url)
+                log.info("Started publishing to %s", rtsp_url)
                 return True
             except FileNotFoundError:
-                logging.getLogger(__name__).error("ffmpeg not found; install it with 'sudo apt install -y ffmpeg'")
+                log.error("ffmpeg not found; install it with 'sudo apt install -y ffmpeg'")
                 self._publishing = False
                 return False
             except Exception as e:
-                logging.getLogger(__name__).exception("Failed to start publisher: %s", e)
+                log.exception("Failed to start publisher: %s", e)
                 self._publishing = False
                 # Ensure ffmpeg is torn down if partially started
                 try:
@@ -278,10 +284,10 @@ class Camera:
             min_area: Minimum bbox area (in downscaled space) to draw
         """
         if not _PICAM_AVAILABLE:
-            logging.getLogger(__name__).warning("annotated: Picamera2 not available")
+            log.warning("annotated: Picamera2 not available")
             return False
         if not _CV_AVAILABLE:
-            logging.getLogger(__name__).warning("annotated: OpenCV not available (opencv-python-headless)")
+            log.warning("annotated: OpenCV not available (opencv-python-headless)")
             return False
         with self._annot_lock:
             if self._annot_running:
@@ -537,13 +543,13 @@ class Camera:
                 th = threading.Thread(target=_loop, name="annot-publisher", daemon=True)
                 th.start()
                 self._annot_thread = th
-                logging.getLogger(__name__).info("Started annotated publisher to %s (fps=%s)", rtsp_url, fps)
+                log.info("Started annotated publisher to %s (fps=%s)", rtsp_url, fps)
                 return True
             except FileNotFoundError:
-                logging.getLogger(__name__).error("annotated: ffmpeg not found; install it with 'sudo apt install -y ffmpeg'")
+                log.error("annotated: ffmpeg not found; install it with 'sudo apt install -y ffmpeg'")
                 return False
             except Exception as e:
-                logging.getLogger(__name__).exception("annotated: failed to start: %s", e)
+                log.exception("annotated: failed to start: %s", e)
                 # Best-effort cleanup
                 try:
                     if self._annot_ffmpeg_proc:
