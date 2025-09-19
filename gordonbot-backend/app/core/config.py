@@ -54,8 +54,13 @@ class Settings(BaseModel):
     )
     # Object detection (OpenCV DNN) for annotated stream
     detect_enabled: bool = _getenv_bool("DETECT_ENABLED", False)
+    detect_backend: str = os.getenv("DETECT_BACKEND", "cpu")
     # Path to an ONNX object detection model (e.g. YOLOv5/8). If unset, motion detection is used.
     detect_onnx_path: str | None = os.getenv("DETECT_ONNX_PATH")
+    # Path to a compiled Hailo HEF when using detect_backend="hailo"
+    detect_hailo_hef_path: str | None = os.getenv("DETECT_HAILO_HEF_PATH")
+    # Optional python function for custom Hailo post-processing ("module:function")
+    detect_hailo_postprocess: str | None = os.getenv("DETECT_HAILO_POSTPROCESS")
     # Class labels: 'coco' for built-in COCO80, or path to a labels.txt (one label per line)
     detect_labels: str = os.getenv("DETECT_LABELS", "coco")
     # Confidence and NMS thresholds

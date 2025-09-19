@@ -298,12 +298,13 @@ class Camera:
                 import subprocess
                 from app.core.config import settings
                 # ffmpeg reads raw BGR frames from stdin
-                w, h = self.width, self.height
+                annot_w = self.width
+                annot_h = self.height
                 cmd = [
                     "ffmpeg", "-loglevel", "warning", "-re",
                     "-f", "rawvideo",
                     "-pix_fmt", "bgr24",
-                    "-s", f"{w}x{h}",
+                    "-s", f"{annot_w}x{annot_h}",
                     "-r", str(fps),
                     "-i", "-",
                     # Encode (fallback to libx264 for broad compatibility)
@@ -382,33 +383,43 @@ class Camera:
                                 bgr = arr.copy()
 
                             drawn = False
+                            detections: list[Detection] | None = None
                             if detector is not None:
                                 detections = list(detector.process(bgr))
-                                if detections:
-                                    for det in detections:
-                                        cv2.rectangle(
-                                            bgr,
-                                            (det.x, det.y),
-                                            det.bottom_right(),
-                                            (0, 140, 255),
-                                            2,
-                                        )
-                                        cv2.putText(
-                                            bgr,
-                                            f"{det.label} {det.confidence:.2f}",
-                                            (det.x, max(0, det.y - 6)),
-                                            cv2.FONT_HERSHEY_SIMPLEX,
-                                            0.6,
-                                            (0, 140, 255),
-                                            2,
-                                            cv2.LINE_AA,
-                                        )
+
+                            display_frame = bgr.copy()
+                            if detections:
+                                h_lim, w_lim = display_frame.shape[:2]
+                                for det in detections:
+                                    x1 = max(0, min(w_lim - 1, int(round(det.x))))
+                                    y1 = max(0, min(h_lim - 1, int(round(det.y))))
+                                    x2 = max(0, min(w_lim - 1, int(round(det.x + det.width))))
+                                    y2 = max(0, min(h_lim - 1, int(round(det.y + det.height))))
+                                    if x2 <= x1 or y2 <= y1:
+                                        continue
+                                    cv2.rectangle(
+                                        display_frame,
+                                        (x1, y1),
+                                        (x2, y2),
+                                        (0, 140, 255),
+                                        2,
+                                    )
+                                    cv2.putText(
+                                        display_frame,
+                                        f"{det.label} {det.confidence:.2f}",
+                                        (x1, max(0, y1 - 6)),
+                                        cv2.FONT_HERSHEY_SIMPLEX,
+                                        0.6,
+                                        (0, 140, 255),
+                                        2,
+                                        cv2.LINE_AA,
+                                    )
                                     drawn = True
                             if not drawn:
                                 # Fallback: motion detection on downscaled gray frame
                                 ds_w = 320
-                                scale = ds_w / bgr.shape[1]
-                                ds = cv2.resize(bgr, (ds_w, int(bgr.shape[0] * scale)), interpolation=cv2.INTER_AREA)
+                                scale_md = ds_w / bgr.shape[1]
+                                ds = cv2.resize(bgr, (ds_w, int(bgr.shape[0] * scale_md)), interpolation=cv2.INTER_AREA)
                                 gray = cv2.cvtColor(ds, cv2.COLOR_BGR2GRAY)
                                 fg = self._bg.apply(gray)
                                 # Clean up mask
@@ -426,15 +437,20 @@ class Camera:
                                     y2 = int(y / scale)
                                     w2 = int(w0 / scale)
                                     h2 = int(h0 / scale)
-                                    cv2.rectangle(bgr, (x2, y2), (x2 + w2, y2 + h2), (0, 255, 0), 2)
-                                    cv2.putText(bgr, "motion", (x2, max(0, y2 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
+                                    inv_scale = 1.0 / max(scale_md, 1e-6)
+                                    x_full = int(round(x * inv_scale))
+                                    y_full = int(round(y * inv_scale))
+                                    w_full = int(round(w0 * inv_scale))
+                                    h_full = int(round(h0 * inv_scale))
+                                    cv2.rectangle(display_frame, (x_full, y_full), (x_full + w_full, y_full + h_full), (0, 255, 0), 2)
+                                    cv2.putText(display_frame, "motion", (x_full, max(0, y_full - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
                             # Timestamp overlay
                             ts = time.strftime("%H:%M:%S")
-                            cv2.putText(bgr, ts, (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
+                            cv2.putText(display_frame, ts, (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
 
                             # Write raw BGR frame
                             try:
-                                proc_local.stdin.write(bgr.tobytes())  # type: ignore[union-attr]
+                                proc_local.stdin.write(display_frame.tobytes())  # type: ignore[union-attr]
                             except BrokenPipeError:
                                 log.warning("annotated: ffmpeg stdin closed")
                                 break

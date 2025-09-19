@@ -7,6 +7,7 @@ import logging
 
 from .base import Detection, Detector
 from .cpu import CpuDetector
+from .hailo import HailoDetector
 
 log = logging.getLogger(__name__)
 
@@ -36,21 +37,36 @@ def _load_labels(label_source: str | None) -> list[str]:
 def create_detector(settings) -> Detector | None:
     """Create the configured detector from settings.
 
-    Currently supports the existing OpenCV ONNX workflow. The accelerator
-    implementation will plug into this factory in a later step.
+    Supports CPU (OpenCV DNN) and Hailo accelerator backends.
     """
     if not getattr(settings, "detect_enabled", False):
         return None
-    onnx_path = getattr(settings, "detect_onnx_path", None)
-    if not onnx_path:
-        log.warning("detector: detect_enabled but no DETECT_ONNX_PATH provided")
-        return None
+    backend = str(getattr(settings, "detect_backend", "cpu")).lower()
     labels = _load_labels(getattr(settings, "detect_labels", None))
     conf = float(getattr(settings, "detect_conf_threshold", 0.40))
     nms = float(getattr(settings, "detect_nms_threshold", 0.45))
     input_size = int(getattr(settings, "detect_input_size", 640))
     interval = max(1, int(getattr(settings, "detect_interval", 2)))
     try:
+        if backend == "hailo":
+            hef_path = getattr(settings, "detect_hailo_hef_path", None) or getattr(settings, "detect_hailo_hef", None)
+            if not hef_path:
+                log.warning("detector: detect_backend=hailo but no DETECT_HAILO_HEF_PATH provided")
+                return None
+            postproc = getattr(settings, "detect_hailo_postprocess", None)
+            return HailoDetector(
+                hef_path=hef_path,
+                labels=labels,
+                conf_threshold=conf,
+                nms_threshold=nms,
+                interval=interval,
+                postprocess=postproc,
+            )
+        # Default to CPU backend
+        onnx_path = getattr(settings, "detect_onnx_path", None)
+        if not onnx_path:
+            log.warning("detector: detect_enabled but no DETECT_ONNX_PATH provided")
+            return None
         return CpuDetector(
             onnx_path=onnx_path,
             labels=labels,
@@ -60,7 +76,7 @@ def create_detector(settings) -> Detector | None:
             interval=interval,
         )
     except Exception as exc:
-        log.warning("detector: failed to create CPU detector: %s", exc)
+        log.warning("detector: failed to create %s detector: %s", backend, exc)
         return None
 
 

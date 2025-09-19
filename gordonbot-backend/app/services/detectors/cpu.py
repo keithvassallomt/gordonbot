@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """CPU-based object detector using OpenCV DNN."""
 
+import os
 from pathlib import Path
 from typing import Sequence, List
 import logging
@@ -32,6 +33,7 @@ class CpuDetector(Detector):
         nms_threshold: float,
         input_size: int,
         interval: int = 1,
+        dialect: str | None = None,
     ) -> None:
         if not _CV_AVAILABLE:
             raise RuntimeError("OpenCV (cv2) is not available for CpuDetector")
@@ -45,6 +47,11 @@ class CpuDetector(Detector):
             self._net.setPreferableTarget(getattr(cv2.dnn, "DNN_TARGET_CPU", 0))
         except Exception:
             pass
+        env_dialect = os.getenv("YOLO_ONNX_DIALECT")
+        detected_dialect = dialect or env_dialect or "yolov5"
+        self._dialect = detected_dialect.strip().lower()
+        if self._dialect not in {"yolov5", "yolov8"}:
+            raise ValueError(f"Unsupported YOLO dialect: {self._dialect}")
         self._labels = list(labels or [])
         self._conf = float(conf_threshold)
         self._nms = float(nms_threshold)
@@ -63,10 +70,24 @@ class CpuDetector(Detector):
         detections: List[Detection] = []
         if out is None:
             return detections
+
+        if isinstance(out, (list, tuple)):
+            out = out[0]
         out = np.squeeze(out)
-        if out.ndim == 1:
+        if self._dialect == "yolov8" and out.ndim == 2 and out.shape[0] in (84, 85):
+            out = out.transpose(1, 0)
+        elif out.ndim == 1:
             out = np.expand_dims(out, axis=0)
+
         ih, iw = frame_bgr.shape[:2]
+        if self._dialect == "yolov8":
+            detections = self._decode_yolov8(out, iw, ih)
+        else:
+            detections = self._decode_yolov5(out, iw, ih)
+        return detections
+
+    def _decode_yolov5(self, out: "np.ndarray", iw: int, ih: int) -> List[Detection]:  # type: ignore[name-defined]
+        detections: List[Detection] = []
         boxes: list[list[int]] = []
         scores: list[float] = []
         class_ids: list[int] = []
@@ -88,6 +109,45 @@ class CpuDetector(Detector):
             boxes.append([max(0, x), max(0, y), max(1, w_box), max(1, h_box)])
             scores.append(conf)
             class_ids.append(class_id)
+        return self._nms_and_build(boxes, scores, class_ids)
+
+    def _decode_yolov8(self, out: "np.ndarray", iw: int, ih: int) -> List[Detection]:  # type: ignore[name-defined]
+        detections: List[Detection] = []
+        if out.ndim != 2 or out.shape[1] < 5:
+            return detections
+        boxes_xywh = out[:, :4]
+        class_scores = out[:, 4:]
+        if class_scores.size == 0:
+            return detections
+        class_ids = np.argmax(class_scores, axis=1)
+        confidences = class_scores[np.arange(class_scores.shape[0]), class_ids]
+        mask = confidences >= self._conf
+        if not np.any(mask):
+            return detections
+        boxes_xywh = boxes_xywh[mask]
+        class_ids = class_ids[mask]
+        confidences = confidences[mask]
+
+        boxes: list[list[int]] = []
+        scores: list[float] = []
+        class_list: list[int] = []
+        for (cx, cy, w0, h0), conf, cls in zip(boxes_xywh, confidences, class_ids):
+            x = int((cx - w0 / 2) * iw / self._input_size)
+            y = int((cy - h0 / 2) * ih / self._input_size)
+            w_box = int(w0 * iw / self._input_size)
+            h_box = int(h0 * ih / self._input_size)
+            boxes.append([max(0, x), max(0, y), max(1, w_box), max(1, h_box)])
+            scores.append(float(conf))
+            class_list.append(int(cls))
+        return self._nms_and_build(boxes, scores, class_list)
+
+    def _nms_and_build(
+        self,
+        boxes: list[list[int]],
+        scores: list[float],
+        class_ids: list[int],
+    ) -> List[Detection]:
+        detections: List[Detection] = []
         if not boxes:
             return detections
         idxs = cv2.dnn.NMSBoxes(boxes, scores, self._conf, self._nms)  # type: ignore[attr-defined]

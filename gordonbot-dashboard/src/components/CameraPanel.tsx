@@ -72,6 +72,9 @@ export default function CameraPanel() {
     return API_BASE + VIDEO_WHEP_BASE + stream
   }, [streamKind])
 
+  const containerClass = "aspect-video"
+  const videoObjectClass = "object-cover"
+
   const startWebRTC = async () => {
     if (!whepUrl) return
     if (pcRef.current) return
@@ -214,15 +217,16 @@ export default function CameraPanel() {
         </div>
       </CardHeader>
       <CardContent>
-        <div className="aspect-video w-full overflow-hidden rounded-lg border bg-muted relative">
+        <div className={`${containerClass} w-full overflow-hidden rounded-lg border bg-black relative`}
+        >
           {whepUrl ? (
-            <video ref={videoRef} className="absolute inset-0 h-full w-full object-cover" playsInline muted />
+            <video ref={videoRef} className={`absolute inset-0 h-full w-full ${videoObjectClass}`} playsInline muted />
           ) : (
             <>
               {/* Robot MJPEG feed (fallback) */}
-              <img src={mjpegUrl} alt="Robot camera" className="absolute inset-0 h-full w-full object-cover" />
+              <img src={mjpegUrl} alt="Robot camera" className={`absolute inset-0 h-full w-full ${videoObjectClass}`} />
               {/* Optional local demo overlay */}
-              <video ref={videoRef} className="absolute inset-0 h-full w-full object-cover" playsInline muted style={{ display: active ? 'block' : 'none' }} />
+              <video ref={videoRef} className={`absolute inset-0 h-full w-full ${videoObjectClass}`} playsInline muted style={{ display: active ? 'block' : 'none' }} />
             </>
           )}
         </div>
