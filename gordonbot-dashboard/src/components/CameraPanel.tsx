@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Activity, Camera as CameraIcon } from "lucide-react"
-import { API_BASE, VIDEO_MJPEG_ENDPOINT, VIDEO_WHEP_BASE, VIDEO_WHEP_STREAM_RAW, VIDEO_WHEP_STREAM_ANNOT } from "./config"
+import { API_BASE, VIDEO_MJPEG_ENDPOINT, VIDEO_STATUS_ENDPOINT, VIDEO_WHEP_BASE, VIDEO_WHEP_STREAM_RAW, VIDEO_WHEP_STREAM_ANNOT } from "./config"
 
 
 /**
@@ -30,6 +30,7 @@ export default function CameraPanel() {
   const [connecting, setConnecting] = useState(false)
   const [streamTech, setStreamTech] = useState<"WebRTC" | "MJPEG" | "None">("None")
   const [streamKind, setStreamKind] = useState<"raw" | "annotated">("raw")
+  const [decoderMode, setDecoderMode] = useState<"cpu" | "hailo" | null>(null)
 
   /**
    * Start local demo mode using the device camera.
@@ -147,6 +148,30 @@ export default function CameraPanel() {
     }
   }
 
+  useEffect(() => {
+    let cancelled = false
+    const fetchStatus = async () => {
+      try {
+        const res = await fetch(API_BASE + VIDEO_STATUS_ENDPOINT, { cache: "no-store" })
+        if (!res.ok) return
+        const data: { decoder?: string | null; detect_enabled?: boolean } = await res.json()
+        if (cancelled) return
+        if (data.detect_enabled && typeof data.decoder === "string") {
+          const normalized = data.decoder.toLowerCase()
+          setDecoderMode(normalized === "hailo" ? "hailo" : "cpu")
+        } else {
+          setDecoderMode(null)
+        }
+      } catch {
+        if (!cancelled) setDecoderMode(null)
+      }
+    }
+    void fetchStatus()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   // Auto-connect to WebRTC on mount if available
   useEffect(() => {
     if (whepUrl && !active && !connecting && !pcRef.current) {
@@ -180,6 +205,17 @@ export default function CameraPanel() {
             <Activity className="h-3 w-3" /> Live
           </Badge>
           <Badge variant="outline">{streamTech}</Badge>
+          {streamKind === "annotated" && decoderMode && (
+            <Badge
+              className={
+                decoderMode === "hailo"
+                  ? "border-transparent bg-emerald-500 text-white"
+                  : "border-transparent bg-destructive text-white"
+              }
+            >
+              {decoderMode === "hailo" ? "Hailo decode" : "CPU decode"}
+            </Badge>
+          )}
           <div className="flex items-center gap-1 rounded-md border px-2 py-1 text-xs">
             <label className="mr-1">Stream</label>
             <select

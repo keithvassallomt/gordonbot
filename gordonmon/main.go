@@ -91,6 +91,9 @@ func (p *proc) setAlive(v bool) { p.mu.Lock(); p.alive = v; p.mu.Unlock() }
 var program *tea.Program
 var procsMu sync.Mutex
 var procs = map[string]*proc{}
+var logFileMu sync.Mutex
+var logFile *os.File
+var logFilePath string
 // telemetry message from pollers
 type telemetryMsg struct{ cpu *float64; pct *float64; state string }
 type telemetryTickMsg struct{}
@@ -125,6 +128,46 @@ func firstNonLoopbackIPv4() string {
     fields := strings.Fields(string(out))
     for _, f := range fields { if !strings.HasPrefix(f, "127.") { return f } }
     return "127.0.0.1"
+}
+
+func initLogFile(c cfg) {
+    logsDir := filepath.Join(c.root, "gordonmon", "logs")
+    if err := os.MkdirAll(logsDir, 0o755); err != nil {
+        logsDir = filepath.Join("logs")
+        if err := os.MkdirAll(logsDir, 0o755); err != nil {
+            return
+        }
+    }
+    name := fmt.Sprintf("gordonmon-%s.log", time.Now().Format("2006-01-02_15-04-05"))
+    path := filepath.Join(logsDir, name)
+    f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+    if err != nil {
+        return
+    }
+    logFileMu.Lock()
+    logFile = f
+    logFilePath = path
+    logFileMu.Unlock()
+    writeLogLine(fmt.Sprintf("[start] logging to %s", path))
+}
+
+func writeLogLine(line string) {
+    logFileMu.Lock()
+    defer logFileMu.Unlock()
+    if logFile == nil {
+        return
+    }
+    _, _ = logFile.WriteString(line + "\n")
+}
+
+func closeLogFile() {
+    logFileMu.Lock()
+    defer logFileMu.Unlock()
+    if logFile != nil {
+        _ = logFile.Close()
+        logFile = nil
+    }
+    logFilePath = ""
 }
 
 func haveBin(bin string) bool { return exec.Command("bash", "-lc", "command -v "+bin).Run() == nil }
@@ -233,6 +276,7 @@ type model struct {
     headerH   int
     footerH   int
     tailFollow bool
+    mouseEnabled bool
     levelThreshold int
     showLevelModal bool
     modalIndex int
@@ -266,14 +310,26 @@ func initialModel(c cfg, pagerMode bool) model {
     vp := viewport.New(80, 20)
     vp.MouseWheelEnabled = true
     // pagerMode=true means: do NOT auto-follow logs (act like a pager)
-    return model{cfg: c, vp: vp, spinner: sp, logs: make([]string, 0, 200), maxLines: 5000, status: "starting", ip: firstNonLoopbackIPv4(), starting: true, tailFollow: !pagerMode, levelThreshold: 20, showLevelModal: false, modalIndex: 1}
+    return model{cfg: c, vp: vp, spinner: sp, logs: make([]string, 0, 200), maxLines: 5000, status: "starting", ip: firstNonLoopbackIPv4(), starting: true, tailFollow: !pagerMode, mouseEnabled: true, levelThreshold: 20, showLevelModal: false, modalIndex: 1}
 }
 
 func (m model) Init() tea.Cmd {
-    return tea.Batch(m.spinner.Tick, startAllCmd(m.cfg), scheduleTelemetry())
+    return tea.Batch(m.spinner.Tick, startAllCmd(m.cfg), scheduleTelemetry(), logFileNoticeCmd())
 }
 
 // ----- Commands -----
+
+func logFileNoticeCmd() tea.Cmd {
+    logFileMu.Lock()
+    path := logFilePath
+    logFileMu.Unlock()
+    if path == "" {
+        return nil
+    }
+    return func() tea.Msg {
+        return logMsg{fmt.Sprintf("[start] Saving log copy to %s", path)}
+    }
+}
 
 func startAllCmd(c cfg) tea.Cmd {
     return func() tea.Msg {
@@ -341,7 +397,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
         innerHeaderW := max(1, m.width-hbFw)
         innerFooterW := max(1, m.width-fbFw)
         headerRendered := headerBox.Width(m.width).Render(clipWidth(headerLines(m), innerHeaderW))
-        footerRendered := footerBox.Width(m.width).Render(footerContent(innerFooterW, levelNameFromThreshold(m.levelThreshold)))
+        footerRendered := footerBox.Width(m.width).Render(footerContent(innerFooterW, levelNameFromThreshold(m.levelThreshold), m.mouseEnabled))
         m.headerH = lipgloss.Height(headerRendered)
         m.footerH = lipgloss.Height(footerRendered)
         vpH := m.height - m.headerH - m.footerH - bbFh
@@ -388,6 +444,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
         case "p":
             // toggle pager-like mode: when off, we auto-follow; when on, we keep position
             m.tailFollow = !m.tailFollow
+        case "s":
+            m.mouseEnabled = !m.mouseEnabled
+            if m.mouseEnabled {
+                m.vp.MouseWheelEnabled = true
+                cmds = append(cmds, tea.EnableMouseCellMotion)
+                m.appendLog("[start] Mouse capture enabled; scroll wheel active. Press S to enable selection.")
+            } else {
+                m.vp.MouseWheelEnabled = false
+                cmds = append(cmds, tea.DisableMouse)
+                m.appendLog("[start] Mouse capture disabled; text selectable. Press S to re-enable scrolling.")
+            }
+            m.updateContent()
         case "l":
             m.showLevelModal = true
             m.modalIndex = levelIndexFromThreshold(m.levelThreshold)
@@ -402,17 +470,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
         m.spinner, c = m.spinner.Update(msg)
         cmds = append(cmds, c)
     case logMsg:
-        // colorize tags
-        line := colorizeTags(msg.line)
-        m.logs = append(m.logs, line)
-        if len(m.logs) > m.maxLines { m.logs = m.logs[len(m.logs)-m.maxLines:] }
+        m.appendLog(msg.line)
         m.updateContent()
     case startedMsg:
         if msg.ok { m.status = "running" } else { m.status = "error" }
         m.starting = false
     case procExitMsg:
-        m.logs = append(m.logs, errStyle.Render(fmt.Sprintf("[%s] exited", msg.name)))
-        if len(m.logs) > m.maxLines { m.logs = m.logs[len(m.logs)-m.maxLines:] }
+        m.appendStyledLog(fmt.Sprintf("[%s] exited", msg.name), errStyle)
         m.updateContent()
     case ipUpdateMsg:
         m.ip = msg.ip
@@ -491,7 +555,7 @@ func (m model) View() string {
     bodyRendered := bodyBox.Width(m.width).Render(clipWidth(m.vp.View(), max(1, m.width-bbFw)))
     // Footer
     fbFw, _ := footerBox.GetFrameSize()
-    footerRendered := footerBox.Width(m.width).Render(footerContent(max(1, m.width-fbFw), levelNameFromThreshold(m.levelThreshold)))
+    footerRendered := footerBox.Width(m.width).Render(footerContent(max(1, m.width-fbFw), levelNameFromThreshold(m.levelThreshold), m.mouseEnabled))
 
     base := lipgloss.JoinVertical(lipgloss.Left, headerRendered, bodyRendered, footerRendered)
     if m.showLevelModal {
@@ -538,11 +602,19 @@ func headerLines(m model) string {
     return strings.Join(headerLines, "\n")
 }
 
-func footerContent(width int, level string) string {
+func footerContent(width int, level string, mouseEnabled bool) string {
     // Stylized hotkey bar with emojis; clipped to inner width
-    if level == "" { level = "INFO" }
-    bar := "Q ⛔ Quit   R 🔄 Reload   B 🐍 Restart Backend   F 🖥️ Restart Frontend   P 📜 Toggle Pager   L 🪵 Filter Level   ◼ Level: " + level
-    if width <= 0 { width = 80 }
+    if level == "" {
+        level = "INFO"
+    }
+    selectMode := "copy"
+    if mouseEnabled {
+        selectMode = "scroll"
+    }
+    bar := fmt.Sprintf("Q ⛔ Quit   R 🔄 Reload   B 🐍 Restart Backend   F 🖥️ Restart Frontend   P 📜 Toggle Pager   L 🪵 Filter Level   S 🖱 Select:%s   ◼ Level: %s", selectMode, level)
+    if width <= 0 {
+        width = 80
+    }
     return lipgloss.NewStyle().Width(width).MaxWidth(width).Render(bar)
 }
 
@@ -590,10 +662,30 @@ func (m *model) filteredLines() []string {
     return out
 }
 
+func (m *model) appendLog(raw string) {
+    m.appendLogRendered(raw, colorizeTags(raw))
+}
+
+func (m *model) appendStyledLog(raw string, style lipgloss.Style) {
+    styled := style.Render(colorizeTags(raw))
+    m.appendLogRendered(raw, styled)
+}
+
+func (m *model) appendLogRendered(raw, styled string) {
+    m.logs = append(m.logs, styled)
+    if len(m.logs) > m.maxLines {
+        m.logs = m.logs[len(m.logs)-m.maxLines:]
+    }
+    writeLogLine(raw)
+}
+
 func (m *model) updateContent() {
+    // Follow the tail if explicitly enabled or if the viewport was already
+    // pinned to the bottom when new content arrived.
+    shouldFollow := m.tailFollow || m.vp.AtBottom() || m.vp.PastBottom()
     content := strings.Join(m.filteredLines(), "\n")
     m.vp.SetContent(content)
-    if m.tailFollow { m.vp.GotoBottom() }
+    if shouldFollow { m.vp.GotoBottom() }
 }
 
 func levelIndexFromThreshold(t int) int {
@@ -741,6 +833,9 @@ func fetchTelemetryCmd(c cfg) tea.Cmd {
 
 func main() {
     c := loadCfg()
+    initLogFile(c)
+    defer closeLogFile()
+    writeLogLine("[start] GordonMon session started")
     // Pager-like mode is the default (no auto-follow). Override with GORDONMON_PAGER=0 to tail.
     pagerEnv := os.Getenv("GORDONMON_PAGER")
     pagerMode := true
@@ -759,8 +854,11 @@ func main() {
     }()
     if _, err := p.Run(); err != nil {
         fmt.Fprintln(os.Stderr, "error:", err)
+        writeLogLine(fmt.Sprintf("[start] GordonMon session ended with error: %v", err))
         stopAll()
+        closeLogFile()
         os.Exit(1)
     }
     stopAll()
+    writeLogLine("[start] GordonMon session ended")
 }

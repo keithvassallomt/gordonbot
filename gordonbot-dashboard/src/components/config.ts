@@ -25,6 +25,8 @@ export const VIDEO_MJPEG_ENDPOINT = "/api/video/stream.mjpg"
  * Snapshot path for robot camera.
  */
 export const VIDEO_SNAPSHOT_ENDPOINT = "/api/video/snapshot.jpg"
+/** Video status metadata */
+export const VIDEO_STATUS_ENDPOINT = "/api/video/status"
 
 /** Sensors status endpoint */
 export const SENSORS_ENDPOINT = "/api/sensors/status"

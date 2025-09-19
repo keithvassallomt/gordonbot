@@ -17,6 +17,19 @@ def snapshot_jpg() -> Response:
     return Response(content=data, media_type="image/jpeg")
 
 
+@router.get("/video/status", tags=["video"])
+def video_status() -> dict[str, object | None]:
+    """Return stream availability and decoder backend details."""
+    detect_enabled = bool(getattr(settings, "detect_enabled", False))
+    backend = str(getattr(settings, "detect_backend", "cpu")).lower()
+    decoder = backend if detect_enabled else None
+    return {
+        "annotated_available": bool(getattr(settings, "camera_rtsp_annot_url", None)),
+        "decoder": decoder,
+        "detect_enabled": detect_enabled,
+    }
+
+
 @router.post("/video/whep/{stream}", tags=["video"])
 async def whep_offer(stream: str, request: Request) -> Response:
     """Proxy a WHEP offer to MediaMTX to avoid CORS.
