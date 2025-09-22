@@ -135,6 +135,7 @@ class Settings(BaseModel):
     speech_vad_silence_ms: int = max(100, int(os.getenv("SPEECH_VAD_SILENCE_MS", "700")))
     speech_vad_max_ms: int = max(500, int(os.getenv("SPEECH_VAD_MAX_MS", "10000")))
     speech_pre_roll_ms: int = max(0, int(os.getenv("SPEECH_PRE_ROLL_MS", "200")))
+    speech_backend: str = os.getenv("SPEECH_BACKEND", "faster-whisper")
     speech_model: str = os.getenv("SPEECH_MODEL", "tiny.en")
     speech_device: str = os.getenv("SPEECH_DEVICE", "auto")
     speech_compute_type: str = os.getenv("SPEECH_COMPUTE_TYPE", "auto")
@@ -142,6 +143,20 @@ class Settings(BaseModel):
     speech_recording_dir: str = os.getenv(
         "SPEECH_RECORDING_DIR",
         str(BACKEND_ROOT / "assets" / "recording"),
+    )
+    whispercpp_bin: str = os.getenv(
+        "WHISPER_CPP_BIN",
+        str(BACKEND_ROOT / "third_party" / "whisper_cpp" / "build" / "bin" / "whisper-cli"),
+    )
+    whispercpp_model: str = os.getenv(
+        "WHISPER_CPP_MODEL",
+        str(BACKEND_ROOT / "models" / "whisper" / "ggml-tiny.en-q5_1.bin"),
+    )
+    whispercpp_threads: int = int(
+        os.getenv(
+            "WHISPER_CPP_THREADS",
+            str(max(1, (os.cpu_count() or 1))),
+        )
     )
 
 # Simple settings instance (expand later for env vars)

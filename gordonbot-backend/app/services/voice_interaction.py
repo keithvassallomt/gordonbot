@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import math
 import queue
 import struct
 import threading
@@ -12,9 +11,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional, Sequence
 
-import numpy as np  # type: ignore
-
 from .audio_playback import AudioCuePlayer
+from .transcription import Transcriber, TranscriptionError
 
 log = logging.getLogger(__name__)
 
@@ -27,12 +25,6 @@ try:  # pragma: no cover
     from pvrecorder import PvRecorder  # type: ignore
 except Exception:  # pragma: no cover
     PvRecorder = None  # type: ignore
-
-try:  # pragma: no cover
-    from faster_whisper import WhisperModel  # type: ignore
-except Exception:  # pragma: no cover
-    WhisperModel = None  # type: ignore
-
 
 def _pcm_to_bytes(frame: Sequence[int]) -> bytes:
     return struct.pack("<%dh" % len(frame), *frame)
@@ -132,14 +124,18 @@ class VoiceInteractionController:
     ) -> None:
         self._wakeword_service_getter = wakeword_service_getter
         self._queue: "queue.Queue[datetime]" = queue.Queue()
-        self._worker = threading.Thread(target=self._run, name="voice-interaction", daemon=True)
-        self._worker.start()
         self._busy = threading.Event()
-        self._model_lock = threading.Lock()
-        self._model: WhisperModel | None = None
         self._settings = settings
         self._wake_player = wake_player
         self._ack_player: AudioCuePlayer | None = None
+        try:
+            self._transcriber = Transcriber(settings)
+        except TranscriptionError as exc:
+            log.error("Transcription backend unavailable: %s", exc)
+            self._transcriber = None
+
+        self._worker = threading.Thread(target=self._run, name="voice-interaction", daemon=True)
+        self._worker.start()
 
         if getattr(settings, "ack_audio_enabled", False):
             try:
@@ -155,8 +151,8 @@ class VoiceInteractionController:
         if webrtcvad is None:
             log.warning("WebRTC VAD not available; voice transcription disabled")
 
-        if WhisperModel is None:
-            log.warning("faster-whisper not available; voice transcription disabled")
+        if self._transcriber is None:
+            log.warning("No speech transcription backend available; voice commands disabled")
 
     def notify_wake(self, ts: datetime) -> None:
         if self._busy.is_set():
@@ -177,8 +173,11 @@ class VoiceInteractionController:
                 self._busy.clear()
 
     def _handle_interaction(self, ts: datetime) -> None:
-        if webrtcvad is None or WhisperModel is None or PvRecorder is None:
-            log.debug("Voice interaction skipped: missing dependencies")
+        if webrtcvad is None or PvRecorder is None:
+            log.debug("Voice interaction skipped: missing audio dependencies")
+            return
+        if self._transcriber is None:
+            log.warning("Skipping voice interaction; transcription backend unavailable")
             return
 
         log.info("Voice interaction starting (wake at %s)", ts.isoformat())
@@ -226,7 +225,11 @@ class VoiceInteractionController:
             except Exception as exc:
                 log.error("Failed to restart wake-word service: %s", exc)
 
-        text, confidence = self._transcribe(audio_bytes)
+        try:
+            text, confidence = self._transcriber.transcribe(audio_bytes)
+        except TranscriptionError as exc:
+            log.error("Transcription failed: %s", exc)
+            return
         if text:
             msg = f"Wake transcript: '{text}' (confidence {confidence:.2f})"
         else:
@@ -253,38 +256,6 @@ class VoiceInteractionController:
                     log.error("Failed to load Whisper model '%s': %s", self._settings.speech_model, exc)
                     self._model = None
             return self._model
-
-    def _transcribe(self, audio_bytes: bytes) -> tuple[str, float]:
-        model = self._load_model()
-        if model is None:
-            return "", 0.0
-
-        audio_np = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-        try:
-            segments, info = model.transcribe(
-                audio_np,
-                beam_size=1,
-                patience=1,
-                language="en",
-            )
-        except Exception as exc:
-            log.error("Whisper transcription failed: %s", exc)
-            return "", 0.0
-
-        texts: list[str] = []
-        confidences: list[float] = []
-        for seg in segments:
-            if seg.text:
-                texts.append(seg.text.strip())
-            if seg.avg_logprob is not None:
-                confidences.append(math.exp(seg.avg_logprob))
-
-        if not texts:
-            return "", 0.0
-
-        confidence = float(sum(confidences) / len(confidences)) if confidences else 0.0
-        text = " ".join(texts).strip()
-        return text, max(0.0, min(1.0, confidence))
 
     def _dispatch_command(self, text: str, confidence: float) -> None:
         try:
