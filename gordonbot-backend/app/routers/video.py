@@ -1,5 +1,5 @@
 from __future__ import annotations
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 import urllib.request
 import urllib.error
@@ -18,7 +18,7 @@ def snapshot_jpg() -> Response:
 
 
 @router.get("/video/status", tags=["video"])
-def video_status() -> dict[str, object | None]:
+def video_status(request: Request) -> dict[str, object | None]:
     """Return stream availability and decoder backend details."""
     detect_enabled = bool(getattr(settings, "detect_enabled", False))
     backend = str(getattr(settings, "detect_backend", "cpu")).lower()
@@ -27,7 +27,36 @@ def video_status() -> dict[str, object | None]:
         "annotated_available": bool(getattr(settings, "camera_rtsp_annot_url", None)),
         "decoder": decoder,
         "detect_enabled": detect_enabled,
+        "raw_active": bool(getattr(request.app.state, "raw_stream_active", False)),
     }
+
+
+def _raw_state(request: Request) -> bool:
+    return bool(getattr(request.app.state, "raw_stream_active", False))
+
+
+@router.post("/video/raw/start", tags=["video"])
+async def start_raw_stream(request: Request) -> dict[str, object]:
+    if not settings.camera_rtsp_url:
+        raise HTTPException(status_code=404, detail="Raw stream not configured")
+    if _raw_state(request):
+        return {"started": True, "already_running": True}
+    ok = camera.start_publisher(settings.camera_rtsp_url, bitrate=settings.camera_bitrate)
+    request.app.state.raw_stream_active = bool(ok)  # type: ignore[attr-defined]
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to start raw stream")
+    return {"started": True, "already_running": False}
+
+
+@router.post("/video/raw/stop", tags=["video"])
+async def stop_raw_stream(request: Request) -> dict[str, object]:
+    if not settings.camera_rtsp_url:
+        raise HTTPException(status_code=404, detail="Raw stream not configured")
+    if not _raw_state(request):
+        return {"stopped": True, "already_stopped": True}
+    camera.stop_publisher()
+    request.app.state.raw_stream_active = False  # type: ignore[attr-defined]
+    return {"stopped": True, "already_stopped": False}
 
 
 @router.post("/video/whep/{stream}", tags=["video"])

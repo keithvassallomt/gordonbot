@@ -27,6 +27,8 @@ export const VIDEO_MJPEG_ENDPOINT = "/api/video/stream.mjpg"
 export const VIDEO_SNAPSHOT_ENDPOINT = "/api/video/snapshot.jpg"
 /** Video status metadata */
 export const VIDEO_STATUS_ENDPOINT = "/api/video/status"
+export const VIDEO_RAW_START_ENDPOINT = "/api/video/raw/start"
+export const VIDEO_RAW_STOP_ENDPOINT = "/api/video/raw/stop"
 
 /** Sensors status endpoint */
 export const SENSORS_ENDPOINT = "/api/sensors/status"

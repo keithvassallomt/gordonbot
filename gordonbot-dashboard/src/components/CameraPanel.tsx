@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Activity, Camera as CameraIcon } from "lucide-react"
-import { API_BASE, VIDEO_MJPEG_ENDPOINT, VIDEO_STATUS_ENDPOINT, VIDEO_WHEP_BASE, VIDEO_WHEP_STREAM_RAW, VIDEO_WHEP_STREAM_ANNOT } from "./config"
+import { API_BASE, VIDEO_MJPEG_ENDPOINT, VIDEO_STATUS_ENDPOINT, VIDEO_RAW_START_ENDPOINT, VIDEO_RAW_STOP_ENDPOINT, VIDEO_WHEP_BASE, VIDEO_WHEP_STREAM_RAW, VIDEO_WHEP_STREAM_ANNOT } from "./config"
 
 
 /**
@@ -31,6 +31,8 @@ export default function CameraPanel() {
   const [streamTech, setStreamTech] = useState<"WebRTC" | "MJPEG" | "None">("None")
   const [streamKind, setStreamKind] = useState<"raw" | "annotated">("raw")
   const [decoderMode, setDecoderMode] = useState<"cpu" | "hailo" | null>(null)
+  const [rawFeedActive, setRawFeedActive] = useState(false)
+  const [rawFeedStartSupported, setRawFeedStartSupported] = useState(true)
 
   /**
    * Start local demo mode using the device camera.
@@ -54,7 +56,21 @@ export default function CameraPanel() {
    * Stop the current video stream and release camera resources.
    * Clears the video element srcObject and sets `active` to false.
    */
-  const stop = () => {
+  const stopRawFeed = async () => {
+    if (!rawFeedStartSupported) return
+    try {
+      const res = await fetch(API_BASE + VIDEO_RAW_STOP_ENDPOINT, { method: "POST" })
+      if (res.ok) {
+        setRawFeedActive(false)
+      } else if (res.status === 404) {
+        setRawFeedStartSupported(false)
+      }
+    } catch {
+      setRawFeedActive(false)
+    }
+  }
+
+  const stop = async ({ keepRawPublisher = false }: { keepRawPublisher?: boolean } = {}) => {
     const v = videoRef.current
     const s = (v?.srcObject as MediaStream | null)
     s?.getTracks().forEach((t) => t.stop())
@@ -65,6 +81,9 @@ export default function CameraPanel() {
     } catch {}
     pcRef.current = null
     setStreamTech("None")
+    if (!keepRawPublisher && rawFeedActive) {
+      await stopRawFeed()
+    }
   }
 
   const mjpegUrl = useMemo(() => API_BASE + VIDEO_MJPEG_ENDPOINT + `?t=${Date.now()}` , [])
@@ -76,11 +95,26 @@ export default function CameraPanel() {
   const containerClass = "aspect-video"
   const videoObjectClass = "object-cover"
 
+  const ensureRawFeed = async () => {
+    if (!rawFeedStartSupported || rawFeedActive) return
+    try {
+      const res = await fetch(API_BASE + VIDEO_RAW_START_ENDPOINT, { method: "POST" })
+      if (res.ok) {
+        setRawFeedActive(true)
+      } else if (res.status === 404) {
+        setRawFeedStartSupported(false)
+      }
+    } catch {
+      setRawFeedActive(false)
+    }
+  }
+
   const startWebRTC = async () => {
     if (!whepUrl) return
     if (pcRef.current) return
     setConnecting(true)
     try {
+      await ensureRawFeed()
       const pc = new RTCPeerConnection()
       pcRef.current = pc
 
@@ -137,6 +171,7 @@ export default function CameraPanel() {
       }
       setActive(true)
       setStreamTech("WebRTC")
+      if (streamKind === "raw") setRawFeedActive(true)
     } catch {
       // Reset state on error
       try { pcRef.current?.close() } catch {}
@@ -154,7 +189,7 @@ export default function CameraPanel() {
       try {
         const res = await fetch(API_BASE + VIDEO_STATUS_ENDPOINT, { cache: "no-store" })
         if (!res.ok) return
-        const data: { decoder?: string | null; detect_enabled?: boolean } = await res.json()
+        const data: { decoder?: string | null; detect_enabled?: boolean; raw_active?: boolean } = await res.json()
         if (cancelled) return
         if (data.detect_enabled && typeof data.decoder === "string") {
           const normalized = data.decoder.toLowerCase()
@@ -162,11 +197,14 @@ export default function CameraPanel() {
         } else {
           setDecoderMode(null)
         }
+        if (typeof data.raw_active === "boolean") {
+          setRawFeedActive(data.raw_active)
+        }
       } catch {
         if (!cancelled) setDecoderMode(null)
       }
     }
-    void fetchStatus()
+      void fetchStatus()
     return () => {
       cancelled = true
     }
@@ -180,7 +218,7 @@ export default function CameraPanel() {
     }
     // On unmount, ensure we stop any active stream
     return () => {
-      stop()
+      void stop()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -188,8 +226,12 @@ export default function CameraPanel() {
   // If stream kind changes while connected, restart the WebRTC session
   useEffect(() => {
     if (pcRef.current) {
-      stop()
-      void startWebRTC()
+      const preserveRaw = streamKind === "annotated"
+      const restart = async () => {
+        await stop({ keepRawPublisher: preserveRaw })
+        await startWebRTC()
+      }
+      void restart()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [streamKind])
@@ -221,7 +263,10 @@ export default function CameraPanel() {
             <select
               className="bg-transparent outline-none"
               value={streamKind}
-              onChange={(e) => setStreamKind(e.target.value as "raw" | "annotated")}
+              onChange={(e) => {
+                const next = e.target.value as "raw" | "annotated"
+                setStreamKind(next)
+              }}
             >
               <option value="raw">Raw</option>
               <option value="annotated">Annotated</option>
@@ -234,8 +279,8 @@ export default function CameraPanel() {
                   {connecting ? "Connecting..." : "Connect"}
                 </Button>
               ) : (
-                <Button size="sm" variant="secondary" onClick={stop}>
-                  Stop
+                <Button size="sm" variant="secondary" onClick={() => { void stop() }}>
+                  Disconnect
                 </Button>
               )
             ) : (
@@ -244,7 +289,7 @@ export default function CameraPanel() {
                   Demo Connect
                 </Button>
               ) : (
-                <Button size="sm" variant="secondary" onClick={stop}>
+                <Button size="sm" variant="secondary" onClick={() => { void stop() }}>
                   Stop
                 </Button>
               )

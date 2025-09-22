@@ -65,6 +65,7 @@ voice_controller: VoiceInteractionController | None = None
 app.state.wake_word_service = None  # type: ignore[attr-defined]
 app.state.wake_audio_player = None  # type: ignore[attr-defined]
 app.state.voice_controller = None  # type: ignore[attr-defined]
+app.state.raw_stream_active = False  # type: ignore[attr-defined]
 
 # CORS setup. Prefer regex if provided; otherwise use explicit list.
 cors_kwargs = dict(
@@ -110,9 +111,6 @@ def _on_wake_word_detected(ts: datetime) -> None:
 async def _start_streaming_if_configured() -> None:
     global wake_word_service, wake_audio_player, voice_controller
 
-    # Optionally publish to an RTSP server (e.g., MediaMTX) if configured
-    if settings.camera_rtsp_url:
-        camera.start_publisher(settings.camera_rtsp_url, bitrate=settings.camera_bitrate)
     # Optional annotated stream publisher (OpenCV overlays)
     if settings.camera_rtsp_annot_url:
         try:
@@ -141,6 +139,8 @@ async def _start_streaming_if_configured() -> None:
     else:
         wake_audio_player = None
         app.state.wake_audio_player = None  # type: ignore[attr-defined]
+
+    app.state.raw_stream_active = False  # type: ignore[attr-defined]
 
     try:
         voice_controller = VoiceInteractionController(
@@ -188,6 +188,7 @@ async def _stop_streaming() -> None:
     app.state.wake_audio_player = None  # type: ignore[attr-defined]
     voice_controller = None
     app.state.voice_controller = None  # type: ignore[attr-defined]
+    app.state.raw_stream_active = False  # type: ignore[attr-defined]
 
 
 # Root-level WHEP proxy removed; use router-mounted endpoint under /api

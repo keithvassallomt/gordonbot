@@ -135,6 +135,12 @@ class Settings(BaseModel):
     speech_vad_silence_ms: int = max(100, int(os.getenv("SPEECH_VAD_SILENCE_MS", "700")))
     speech_vad_max_ms: int = max(500, int(os.getenv("SPEECH_VAD_MAX_MS", "10000")))
     speech_pre_roll_ms: int = max(0, int(os.getenv("SPEECH_PRE_ROLL_MS", "200")))
+    # Camera resolutions (main = raw stream; detect = annotated pipeline)
+    camera_main_width: int = int(os.getenv("CAMERA_MAIN_WIDTH", os.getenv("CAMERA_WIDTH", "1920")))
+    camera_main_height: int = int(os.getenv("CAMERA_MAIN_HEIGHT", os.getenv("CAMERA_HEIGHT", "1080")))
+    camera_detect_width: int = int(os.getenv("CAMERA_DETECT_WIDTH", "640"))
+    camera_detect_height: int = int(os.getenv("CAMERA_DETECT_HEIGHT", "480"))
+
     speech_backend: str = os.getenv("SPEECH_BACKEND", "faster-whisper")
     speech_model: str = os.getenv("SPEECH_MODEL", "tiny.en")
     speech_device: str = os.getenv("SPEECH_DEVICE", "auto")

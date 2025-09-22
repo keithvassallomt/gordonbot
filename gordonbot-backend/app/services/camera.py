@@ -47,15 +47,22 @@ except Exception as e:
         log.info("Picamera2 still unavailable after path injection: %s", e2)
 
 
+from app.core.config import settings
+
+
 class Camera:
     """Minimal camera abstraction producing JPEG frames.
 
     - Uses Picamera2 when available (on Raspberry Pi)
     """
 
-    def __init__(self, width: int = 640, height: int = 480, quality: int = 80, fps: int = 10) -> None:
-        self.width = width
-        self.height = height
+    def __init__(self, width: int | None = None, height: int | None = None,
+                 detect_width: int | None = None, detect_height: int | None = None,
+                 quality: int = 80, fps: int = 10) -> None:
+        self.width = width or getattr(settings, "camera_main_width", 1920)
+        self.height = height or getattr(settings, "camera_main_height", 1080)
+        self.detect_width = detect_width or getattr(settings, "camera_detect_width", max(160, self.width // 4))
+        self.detect_height = detect_height or getattr(settings, "camera_detect_height", max(120, self.height // 4))
         self.quality = quality
         self.fps = fps
         self._picam: Optional[Picamera2] = None  # type: ignore
@@ -103,7 +110,7 @@ class Camera:
                 cam = Picamera2()  # type: ignore
                 cfg = cam.create_video_configuration(
                     main={"size": (self.width, self.height), "format": "RGB888"},
-                    lores={"size": (max(160, self.width // 4), max(120, self.height // 4)), "format": "YUV420"},
+                    lores={"size": (self.detect_width, self.detect_height), "format": "YUV420"},
                 )
                 cam.configure(cfg)
 
@@ -298,8 +305,8 @@ class Camera:
                 import subprocess
                 from app.core.config import settings
                 # ffmpeg reads raw BGR frames from stdin
-                annot_w = self.width
-                annot_h = self.height
+                annot_w = self.detect_width
+                annot_h = self.detect_height
                 cmd = [
                     "ffmpeg", "-loglevel", "warning", "-re",
                     "-f", "rawvideo",
@@ -362,25 +369,20 @@ class Camera:
                             time.sleep(max(0.0, period - (now - last)))
                         last = time.time()
 
-                        frame_rgb, is_rgb = self._latest_frame()
-                        if frame_rgb is None:
+                        frame_data = self._last_frame_lores if self._last_frame_lores is not None else self._last_frame_main
+                        if frame_data is None:
                             continue
                         try:
-                            # Ensure numpy array and convert RGB->BGR for OpenCV
-                            arr = np.asarray(frame_rgb)
-                            if getattr(arr, "ndim", 0) != 3 or arr.shape[2] != 3:
-                                continue
-                            # Convert to BGR for OpenCV/ffmpeg. Some platforms deliver RGB888 as BGR in memory.
-                            # Reuse the same swap flag semantics as capture_jpeg():
-                            # - If self._swap_rb is true, incoming is likely BGR → keep as-is for OpenCV.
-                            # - Else incoming is RGB → swap to BGR.
-                            try:
-                                if self._swap_rb and getattr(arr, "ndim", 0) == 3 and arr.shape[2] == 3:
+                            arr = np.asarray(frame_data)
+                            if arr.ndim == 3 and arr.shape[2] == 3:
+                                if self._swap_rb:
                                     bgr = arr.copy()
                                 else:
                                     bgr = arr[:, :, ::-1].copy()
-                            except Exception:
-                                bgr = arr.copy()
+                            elif arr.ndim == 2:
+                                bgr = cv2.cvtColor(arr, cv2.COLOR_YUV2BGR_I420)
+                            else:
+                                continue
 
                             drawn = False
                             detections: list[Detection] | None = None
@@ -417,9 +419,10 @@ class Camera:
                                     drawn = True
                             if not drawn:
                                 # Fallback: motion detection on downscaled gray frame
-                                ds_w = 320
-                                scale_md = ds_w / bgr.shape[1]
-                                ds = cv2.resize(bgr, (ds_w, int(bgr.shape[0] * scale_md)), interpolation=cv2.INTER_AREA)
+                                ds_w = min(320, bgr.shape[1])
+                                scale_md = ds_w / max(1, bgr.shape[1])
+                                ds_h = int(bgr.shape[0] * scale_md)
+                                ds = cv2.resize(bgr, (ds_w, max(1, ds_h)), interpolation=cv2.INTER_AREA)
                                 gray = cv2.cvtColor(ds, cv2.COLOR_BGR2GRAY)
                                 fg = self._bg.apply(gray)
                                 # Clean up mask
@@ -432,11 +435,6 @@ class Camera:
                                     area = w0 * h0
                                     if area < max(1, min_area):
                                         continue
-                                    # scale back to full-res coordinates
-                                    x2 = int(x / scale)
-                                    y2 = int(y / scale)
-                                    w2 = int(w0 / scale)
-                                    h2 = int(h0 / scale)
                                     inv_scale = 1.0 / max(scale_md, 1e-6)
                                     x_full = int(round(x * inv_scale))
                                     y_full = int(round(y * inv_scale))
