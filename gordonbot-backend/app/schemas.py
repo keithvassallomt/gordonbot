@@ -1,6 +1,7 @@
 from __future__ import annotations
 from pydantic import BaseModel, Field
 from typing import List, Optional
+from datetime import datetime
 
 # ---- Battery ----------------------------------------------------------------
 
@@ -89,3 +90,10 @@ class SensorsStatus(BaseModel):
     encoders: Optional[MotorEncoders] = None
     tof: Optional[ToFData] = None
     bno055: Optional[BNO055Data] = None
+
+
+class WakeWordStatus(BaseModel):
+    enabled: bool
+    detections: int = 0
+    last_detected_at: Optional[datetime] = None
+    recent: List[datetime] = Field(default_factory=list)

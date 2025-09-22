@@ -1,5 +1,6 @@
 from __future__ import annotations
 from pydantic import BaseModel
+from pathlib import Path
 import os
 try:
     from dotenv import load_dotenv  # type: ignore
@@ -21,6 +22,9 @@ def _getenv_list(name: str, default: list[str] | None = None) -> list[str]:
     # Split on commas and whitespace, keep non-empty
     parts = [p.strip() for p in raw.replace("\n", ",").split(",")]
     return [p for p in parts if p]
+
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+
 
 class Settings(BaseModel):
     api_prefix: str = "/api"
@@ -87,6 +91,58 @@ class Settings(BaseModel):
     # Optional per-motor overrides; if unset, left scales apply to right as well
     encoder_scale_fwd_right: float = float(os.getenv("ENCODER_SCALE_FWD_RIGHT", os.getenv("ENCODER_SCALE_FWD", "1.024")))
     encoder_scale_rev_right: float = float(os.getenv("ENCODER_SCALE_REV_RIGHT", os.getenv("ENCODER_SCALE_REV", "1.068")))
+
+    # Wake word detection (Porcupine)
+    wakeword_enabled: bool = _getenv_bool("WAKEWORD_ENABLED", False)
+    wakeword_access_key: str | None = os.getenv("PICOVOICE_ACCESS_KEY") or os.getenv("PICOVOICE_KEY")
+    wakeword_keyword_path: str = os.getenv(
+        "WAKEWORD_KEYWORD_PATH",
+        str(BACKEND_ROOT / "models" / "porcupine" / "gordon.ppn"),
+    )
+    wakeword_sensitivity: float = float(os.getenv("WAKEWORD_SENSITIVITY", "0.6"))
+    wakeword_audio_device_index: int | None = (
+        int(os.environ["WAKEWORD_AUDIO_DEVICE_INDEX"])
+        if os.getenv("WAKEWORD_AUDIO_DEVICE_INDEX") not in (None, "")
+        else None
+    )
+
+    # Optional: skip Porcupine init when dependencies unavailable (dev laptops)
+    wakeword_allow_missing_deps: bool = _getenv_bool("WAKEWORD_ALLOW_MISSING_DEPS", True)
+
+    # Wake word audio feedback
+    wakeword_audio_enabled: bool = _getenv_bool("WAKEWORD_AUDIO_ENABLED", True)
+    wakeword_audio_path: str = os.getenv(
+        "WAKEWORD_AUDIO_PATH",
+        str(BACKEND_ROOT / "assets" / "audio" / "wake.mp3"),
+    )
+    wakeword_audio_command: str = os.getenv(
+        "WAKEWORD_AUDIO_CMD",
+        "ffplay -nodisp -autoexit {path}",
+    )
+
+    ack_audio_enabled: bool = _getenv_bool("ACK_AUDIO_ENABLED", True)
+    ack_audio_path: str = os.getenv(
+        "ACK_AUDIO_PATH",
+        str(BACKEND_ROOT / "assets" / "audio" / "ack.mp3"),
+    )
+    ack_audio_command: str = os.getenv(
+        "ACK_AUDIO_CMD",
+        wakeword_audio_command,
+    )
+
+    # Speech capture / ASR
+    speech_vad_aggressiveness: int = max(0, min(3, int(os.getenv("SPEECH_VAD_AGGRESSIVENESS", "2"))))
+    speech_vad_silence_ms: int = max(100, int(os.getenv("SPEECH_VAD_SILENCE_MS", "700")))
+    speech_vad_max_ms: int = max(500, int(os.getenv("SPEECH_VAD_MAX_MS", "10000")))
+    speech_pre_roll_ms: int = max(0, int(os.getenv("SPEECH_PRE_ROLL_MS", "200")))
+    speech_model: str = os.getenv("SPEECH_MODEL", "tiny.en")
+    speech_device: str = os.getenv("SPEECH_DEVICE", "auto")
+    speech_compute_type: str = os.getenv("SPEECH_COMPUTE_TYPE", "auto")
+    speech_save_recordings: bool = _getenv_bool("SPEECH_SAVE_RECORDINGS", False)
+    speech_recording_dir: str = os.getenv(
+        "SPEECH_RECORDING_DIR",
+        str(BACKEND_ROOT / "assets" / "recording"),
+    )
 
 # Simple settings instance (expand later for env vars)
 settings = Settings()

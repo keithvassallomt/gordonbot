@@ -38,6 +38,25 @@ def _get_throttling() -> Dict[str, Any] | None:
         return None
 
 
+def get_cpu_temperature() -> float | None:
+    try:
+        temps = getattr(psutil, "sensors_temperatures", lambda: None)()
+        if not temps:
+            return None
+        if "cpu_thermal" in temps and temps["cpu_thermal"]:
+            return temps["cpu_thermal"][0].current
+        if "coretemp" in temps and temps["coretemp"]:
+            return temps["coretemp"][0].current
+        if "rp1_adc" in temps and temps["rp1_adc"]:
+            return temps["rp1_adc"][0].current
+        first = next(iter(temps.values()))
+        if first:
+            return first[0].current
+    except Exception:
+        pass
+    return None
+
+
 def get_system_diagnostics() -> Dict[str, Any]:
     """
     Return system diagnostics including CPU, load, temperatures, memory, disk, uptime, and Pi throttling flags.
@@ -77,23 +96,16 @@ def get_system_diagnostics() -> Dict[str, Any]:
         diag["load_per_cpu"] = None
 
     # Temperatures: expose both CPU and RP1 when available
-    cpu_temp = None
+    cpu_temp = get_cpu_temperature()
     rp1_temp = None
     try:
         temps = getattr(psutil, "sensors_temperatures", lambda: None)()
         if temps:
-            if "cpu_thermal" in temps and temps["cpu_thermal"]:
-                cpu_temp = temps["cpu_thermal"][0].current
-            elif "coretemp" in temps and temps["coretemp"]:
-                cpu_temp = temps["coretemp"][0].current
             if "rp1_adc" in temps and temps["rp1_adc"]:
                 rp1_temp = temps["rp1_adc"][0].current
-            if cpu_temp is None:
-                first = next(iter(temps.values()))
-                if first:
-                    cpu_temp = first[0].current
     except Exception:
-        pass
+        if cpu_temp is None:
+            cpu_temp = None
     diag["cpu_temperature"] = cpu_temp
     diag["rp1_temperature"] = rp1_temp
 
