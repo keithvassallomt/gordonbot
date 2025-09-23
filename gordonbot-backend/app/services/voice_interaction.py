@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Callable, Optional, Sequence
 
 from .audio_playback import AudioCuePlayer
+from .text_to_speech import build_text_to_speech, TextToSpeech, TextToSpeechError
 from .transcription import Transcriber, TranscriptionError
 
 log = logging.getLogger(__name__)
@@ -128,6 +129,7 @@ class VoiceInteractionController:
         self._settings = settings
         self._wake_player = wake_player
         self._ack_player: AudioCuePlayer | None = None
+        self._tts: TextToSpeech | None = None
         try:
             self._transcriber = Transcriber(settings)
         except TranscriptionError as exc:
@@ -147,6 +149,12 @@ class VoiceInteractionController:
             except Exception as exc:  # pragma: no cover - best effort
                 log.warning("Failed to initialise acknowledgement audio player: %s", exc)
                 self._ack_player = None
+
+        self._tts = build_text_to_speech(settings)
+        if self._tts is None:
+            log.warning("Text-to-speech initialisation failed; responses will not be spoken")
+        elif not getattr(self._tts, "_available", False):
+            log.warning("Text-to-speech backend unavailable; responses will not be spoken")
 
         if webrtcvad is None:
             log.warning("WebRTC VAD not available; voice transcription disabled")
@@ -230,15 +238,24 @@ class VoiceInteractionController:
         except TranscriptionError as exc:
             log.error("Transcription failed: %s", exc)
             return
-        if text:
-            msg = f"Wake transcript: '{text}' (confidence {confidence:.2f})"
+
+        backend_label = getattr(self._transcriber, "backend_name", None)
+        if backend_label:
+            prefix = f"[{backend_label}] "
         else:
-            msg = "Wake transcript: <no text recognised>"
+            prefix = ""
+
+        spoken_response: str | None = None
+        if text:
+            msg = f"{prefix}Wake transcript: '{text}' (confidence {confidence:.2f})"
+            spoken_response = self._dispatch_command(text, confidence)
+        else:
+            msg = f"{prefix}Wake transcript: <no text recognised>"
 
         print(msg)
         log.info(msg)
-        if text:
-            self._dispatch_command(text, confidence)
+        if spoken_response:
+            self._speak(spoken_response)
 
     # ------------------------------------------------------------------
     def _load_model(self) -> Optional[WhisperModel]:
@@ -257,17 +274,27 @@ class VoiceInteractionController:
                     self._model = None
             return self._model
 
-    def _dispatch_command(self, text: str, confidence: float) -> None:
+    def _dispatch_command(self, text: str, confidence: float) -> str | None:
         try:
             from app.services.voice_router import handle_transcript
         except Exception:
             log.exception("Failed to import voice_router for command dispatch")
-            return
+            return None
 
         try:
-            handle_transcript(text=text, confidence=confidence)
+            return handle_transcript(text=text, confidence=confidence)
         except Exception:
             log.exception("Command dispatch raised an error")
+            return None
+
+    def _speak(self, text: str) -> None:
+        if not self._tts:
+            log.debug("TTS unavailable; would have spoken: %s", text)
+            return
+        try:
+            self._tts.speak(text)
+        except TextToSpeechError as exc:
+            log.error("TTS playback failed: %s", exc)
 
     def _maybe_save_recording(self, audio_bytes: bytes) -> None:
         if not getattr(self._settings, "speech_save_recordings", False):

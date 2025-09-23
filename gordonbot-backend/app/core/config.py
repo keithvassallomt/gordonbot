@@ -113,7 +113,7 @@ class Settings(BaseModel):
     wakeword_audio_enabled: bool = _getenv_bool("WAKEWORD_AUDIO_ENABLED", True)
     wakeword_audio_path: str = os.getenv(
         "WAKEWORD_AUDIO_PATH",
-        str(BACKEND_ROOT / "assets" / "audio" / "wake.mp3"),
+        str(BACKEND_ROOT / "assets" / "audio" / "wake.wav"),
     )
     wakeword_audio_command: str = os.getenv(
         "WAKEWORD_AUDIO_CMD",
@@ -123,7 +123,7 @@ class Settings(BaseModel):
     ack_audio_enabled: bool = _getenv_bool("ACK_AUDIO_ENABLED", True)
     ack_audio_path: str = os.getenv(
         "ACK_AUDIO_PATH",
-        str(BACKEND_ROOT / "assets" / "audio" / "ack.mp3"),
+        str(BACKEND_ROOT / "assets" / "audio" / "ack.wav"),
     )
     ack_audio_command: str = os.getenv(
         "ACK_AUDIO_CMD",
@@ -141,7 +141,7 @@ class Settings(BaseModel):
     camera_detect_width: int = int(os.getenv("CAMERA_DETECT_WIDTH", "640"))
     camera_detect_height: int = int(os.getenv("CAMERA_DETECT_HEIGHT", "480"))
 
-    speech_backend: str = os.getenv("SPEECH_BACKEND", "faster-whisper")
+    speech_backend: str = os.getenv("SPEECH_BACKEND", "auto")
     speech_model: str = os.getenv("SPEECH_MODEL", "tiny.en")
     speech_device: str = os.getenv("SPEECH_DEVICE", "auto")
     speech_compute_type: str = os.getenv("SPEECH_COMPUTE_TYPE", "auto")
@@ -150,6 +150,11 @@ class Settings(BaseModel):
         "SPEECH_RECORDING_DIR",
         str(BACKEND_ROOT / "assets" / "recording"),
     )
+    speech_api_base: str = os.getenv("SPEECH_API_BASE", "https://api.openai.com/v1")
+    speech_api_model: str = os.getenv("SPEECH_API_MODEL", "whisper-1")
+    speech_api_key: str | None = os.getenv("SPEECH_API_KEY")
+    speech_api_org: str | None = os.getenv("SPEECH_API_ORG")
+    speech_api_timeout: float = float(os.getenv("SPEECH_API_TIMEOUT", "30"))
     whispercpp_bin: str = os.getenv(
         "WHISPER_CPP_BIN",
         str(BACKEND_ROOT / "third_party" / "whisper_cpp" / "build" / "bin" / "whisper-cli"),
@@ -163,6 +168,30 @@ class Settings(BaseModel):
             "WHISPER_CPP_THREADS",
             str(max(1, (os.cpu_count() or 1))),
         )
+    )
+
+    # Speech synthesis
+    tts_backend: str = os.getenv("TTS_BACKEND", "auto")
+    espeak_ng_bin: str = os.getenv("ESPEAK_NG_BIN", "espeak-ng")
+    espeak_voice: str = os.getenv("ESPEAK_VOICE", "en-US")
+    espeak_rate: int = int(os.getenv("ESPEAK_RATE", "170"))
+    espeak_pitch: int = int(os.getenv("ESPEAK_PITCH", "50"))
+    espeak_amplitude: int = int(os.getenv("ESPEAK_AMPLITUDE", "200"))
+    tts_use_filter: bool = _getenv_bool("TTS_USE_FILTER", True)
+    sox_bin: str = os.getenv("SOX_BIN", "sox")
+    tts_sox_effects: str = os.getenv(
+        "TTS_SOX_EFFECTS",
+        "pitch +150 tremolo 12 40 flanger echo 0.4 0.5 25 0.3 echo 0.3 0.4 50 0.2 gain -1",
+    )
+    tts_sox_destination: str = os.getenv("TTS_SOX_DESTINATION", "-t alsa default")
+    tts_api_base: str = os.getenv("TTS_API_BASE", "https://api.openai.com/v1")
+    tts_api_timeout: float = float(os.getenv("TTS_API_TIMEOUT", "30"))
+    tts_openai_model: str = os.getenv("TTS_OPENAI_MODEL", "gpt-4o-mini-tts")
+    tts_openai_voice: str = os.getenv("TTS_OPENAI_VOICE", "onyx")
+    voice_reply_model: str = os.getenv("VOICE_REPLY_MODEL", "gpt-4o-mini")
+    voice_reply_system_prompt: str = os.getenv(
+        "VOICE_REPLY_SYSTEM_PROMPT",
+        "You are the voice of GordonBot. Provide concise, helpful spoken answers.",
     )
 
 # Simple settings instance (expand later for env vars)

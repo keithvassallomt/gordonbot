@@ -128,6 +128,18 @@ Defined in `gordonbot-backend/app/core/config.py` and `gordonbot-backend/.env`.
   - `MEDIAMTX_WHEP_STYLE` → `suffix` (default) or `prefix`; influences target URL formed for MediaMTX
 - Detection
   - `DETECT_ENABLED`, `DETECT_ONNX_PATH`, `DETECT_LABELS`, `DETECT_CONF_THRESHOLD`, `DETECT_NMS_THRESHOLD`, `DETECT_INPUT_SIZE`, `DETECT_INTERVAL`
+- Speech capture / ASR
+  - `SPEECH_BACKEND` (default `auto`: prefer `whisper-api`, fall back to `whispercpp`, then `faster-whisper`)
+  - `SPEECH_MODEL`, `SPEECH_DEVICE`, `SPEECH_COMPUTE_TYPE`
+  - `SPEECH_SAVE_RECORDINGS` + `SPEECH_RECORDING_DIR`
+  - Whisper API (`SPEECH_BACKEND=auto` or `whisper-api`): `SPEECH_API_KEY`, `SPEECH_API_MODEL`, `SPEECH_API_BASE`, `SPEECH_API_TIMEOUT`, `SPEECH_API_ORG`
+- Speech synthesis
+  - `TTS_BACKEND` (default `auto`: prefer OpenAI `gpt-4o-mini-tts`, fall back to `espeak-ng`)
+  - OpenAI settings: `TTS_API_BASE`, `TTS_API_TIMEOUT`, `TTS_OPENAI_MODEL`, `TTS_OPENAI_VOICE` (uses `SPEECH_API_KEY`)
+  - eSpeak NG settings: `ESPEAK_NG_BIN`, `ESPEAK_VOICE`, `ESPEAK_RATE`, `ESPEAK_PITCH`, `ESPEAK_AMPLITUDE`
+  - SoX filtering/output: `TTS_USE_FILTER`, `SOX_BIN`, `TTS_SOX_DESTINATION`, `TTS_SOX_EFFECTS`
+- Voice responses (LLM fallback)
+  - `VOICE_REPLY_MODEL`, `VOICE_REPLY_SYSTEM_PROMPT`
 - Annotation
   - `ANNOT_FPS`, `ANNOT_MIN_AREA`
 - Verbose logging
