@@ -34,3 +34,6 @@ __pycache__/
 .env
 *.env
 .env.*
+# Local recordings and logs
+assets/recording/*
+*.log
