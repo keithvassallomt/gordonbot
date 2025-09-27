@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import logging
 import math
 import os
@@ -12,6 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np  # type: ignore
+import requests
 
 log = logging.getLogger(__name__)
 
@@ -25,38 +27,167 @@ class TranscriptionError(RuntimeError):
     pass
 
 
+class TranscriptionNetworkError(TranscriptionError):
+    """Raised when cloud transcription fails due to connectivity issues."""
+
+
 class Transcriber:
-    """Backend-agnostic speech transcriber supporting faster_whisper and whisper.cpp."""
+    """Backend-agnostic speech transcriber supporting OpenAI Whisper API, faster_whisper, and whisper.cpp."""
 
     def __init__(self, settings) -> None:
         self._settings = settings
-        self._backend = (settings.speech_backend or "faster-whisper").lower()
         self._model_lock = threading.Lock()
         self._model: WhisperModel | None = None
+        backend_raw = (getattr(settings, "speech_backend", "auto") or "auto").strip().lower()
+        self._auto_mode = backend_raw in {"", "auto"}
+        preferred_backend = "whisper-api" if self._auto_mode else backend_raw
 
-        if self._backend not in {"faster-whisper", "whispercpp"}:
-            log.warning("Unknown speech backend '%s'; defaulting to faster-whisper", self._backend)
-            self._backend = "faster-whisper"
+        allowed_backends = {"whisper-api", "whispercpp", "faster-whisper"}
+        if preferred_backend not in allowed_backends:
+            log.warning("Unknown speech backend '%s'; defaulting to whisper-api", preferred_backend)
+            preferred_backend = "whisper-api"
+            self._auto_mode = True
 
-        if self._backend == "whispercpp":
-            if not self._whispercpp_available():
-                log.warning("whisper.cpp binary/model unavailable; falling back to faster-whisper")
-                self._backend = "faster-whisper"
+        self._speech_api_key = getattr(settings, "speech_api_key", None)
+        self._speech_api_base = (
+            getattr(settings, "speech_api_base", "https://api.openai.com/v1")
+            or "https://api.openai.com/v1"
+        ).rstrip("/")
+        self._speech_api_model = getattr(settings, "speech_api_model", "whisper-1") or "whisper-1"
+        self._speech_api_timeout = float(getattr(settings, "speech_api_timeout", 30.0) or 30.0)
+        self._speech_api_org = getattr(settings, "speech_api_org", None)
 
-        if self._backend == "faster-whisper" and WhisperModel is None:
-            log.warning("faster-whisper not installed; whisper.cpp required")
-            if self._whispercpp_available():
-                self._backend = "whispercpp"
+        backend = preferred_backend
+
+        if backend == "whisper-api" and not self._speech_api_key:
+            if self._auto_mode:
+                log.warning("Whisper API backend requires SPEECH_API_KEY; falling back to whisper.cpp")
+                backend = "whispercpp"
             else:
-                raise TranscriptionError("No speech backend available (faster-whisper missing, whisper.cpp unavailable)")
+                raise TranscriptionError(
+                    "Whisper API backend selected but SPEECH_API_KEY is not configured"
+                )
+
+        if backend == "whispercpp" and not self._whispercpp_available():
+            if self._auto_mode:
+                log.warning("whisper.cpp binary/model unavailable; attempting faster-whisper fallback")
+                backend = "faster-whisper"
+            else:
+                raise TranscriptionError("whisper.cpp binary/model unavailable")
+
+        if backend == "faster-whisper" and WhisperModel is None:
+            if self._whispercpp_available():
+                log.warning("faster-whisper not installed; using whisper.cpp backend")
+                backend = "whispercpp"
+            else:
+                raise TranscriptionError(
+                    "No speech backend available (faster-whisper missing, whisper.cpp unavailable)"
+                )
+
+        self._backend = backend
+        self._preferred_backend = preferred_backend
 
         log.info("Speech transcription backend: %s", self._backend)
 
     # ------------------------------------------------------------------
     def transcribe(self, audio_bytes: bytes) -> tuple[str, float]:
+        if self._backend == "whisper-api":
+            try:
+                return self._transcribe_whisper_api(audio_bytes)
+            except TranscriptionNetworkError as exc:
+                if self._auto_mode and self._whispercpp_available():
+                    log.warning("Whisper API unavailable (%s); using whisper.cpp fallback", exc)
+                    self._backend = "whispercpp"
+                    return self._transcribe_whispercpp(audio_bytes)
+                raise
+
         if self._backend == "whispercpp":
             return self._transcribe_whispercpp(audio_bytes)
-        return self._transcribe_faster_whisper(audio_bytes)
+
+        if self._backend == "faster-whisper":
+            return self._transcribe_faster_whisper(audio_bytes)
+
+        raise TranscriptionError(f"Unsupported speech backend: {self._backend}")
+
+    # ------------------------------------------------------------------
+    def _transcribe_whisper_api(self, audio_bytes: bytes) -> tuple[str, float]:
+        if not self._speech_api_key:
+            raise TranscriptionError("SPEECH_API_KEY is required for whisper API transcription")
+
+        with io.BytesIO() as buffer:
+            with wave.open(buffer, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(16_000)
+                wf.writeframes(audio_bytes)
+            wav_data = buffer.getvalue()
+
+        url = f"{self._speech_api_base}/audio/transcriptions"
+        headers = {
+            "Authorization": f"Bearer {self._speech_api_key}",
+        }
+        if self._speech_api_org:
+            headers["OpenAI-Organization"] = self._speech_api_org
+
+        data = {
+            "model": self._speech_api_model,
+            "response_format": "json",
+            "language": "en",
+        }
+
+        files = {
+            "file": ("speech.wav", wav_data, "audio/wav"),
+        }
+
+        try:
+            response = requests.post(
+                url,
+                headers=headers,
+                data=data,
+                files=files,
+                timeout=self._speech_api_timeout,
+            )
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            message = str(exc) or exc.__class__.__name__
+            raise TranscriptionNetworkError(message) from exc
+        except requests.RequestException as exc:
+            raise TranscriptionError(f"Whisper API request failed: {exc}") from exc
+
+        if response.status_code >= 400:
+            message: str | None = None
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = None
+            if isinstance(payload, dict):
+                if isinstance(payload.get("error"), dict):
+                    message = payload["error"].get("message")
+                message = message or payload.get("message")
+            if not message:
+                message = response.text.strip() or "unknown error"
+            raise TranscriptionError(
+                f"Whisper API returned HTTP {response.status_code}: {message}"
+            )
+
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise TranscriptionError("Whisper API returned non-JSON response") from exc
+
+        if not isinstance(payload, dict):
+            raise TranscriptionError("Unexpected Whisper API response format")
+
+        text = str(payload.get("text", "")).strip()
+        segments_obj = payload.get("segments")
+        if not text and isinstance(segments_obj, list):
+            collected: list[str] = []
+            for segment in segments_obj:
+                if isinstance(segment, dict) and segment.get("text"):
+                    collected.append(str(segment["text"]).strip())
+            text = " ".join(collected).strip()
+
+        confidence = float(payload.get("confidence", 0.0)) if "confidence" in payload else 0.0
+        return text, max(0.0, min(1.0, confidence))
 
     # ------------------------------------------------------------------
     def _transcribe_faster_whisper(self, audio_bytes: bytes) -> tuple[str, float]:
