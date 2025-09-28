@@ -30,10 +30,14 @@ logger.addHandler(_console_handler)
 
 # Default mappings on BCM pins (IN1, IN2)
 MOTOR_LEFT_A = (19, 13)
-ENCODER_LEFT_A = (12, 27)  # (PHASE_A, PHASE_B)
+ENCODER_LEFT_PA = 22
+ENCODER_LEFT_PB = 27
+ENCODER_LEFT = (ENCODER_LEFT_PA, ENCODER_LEFT_PB)
 
 MOTOR_RIGHT_B = (5, 6)
-ENCODER_RIGHT_B = (22, 26)  # (PHASE_A, PHASE_B)
+ENCODER_RIGHT_PA = 12
+ENCODER_RIGHT_PB = 26
+ENCODER_RIGHT = (ENCODER_RIGHT_PA, ENCODER_RIGHT_PB)
 
 
 # --- Distance calibration (adjust to your hardware) ---
@@ -420,8 +424,8 @@ def main():
     ENCODER_STEPS_PER_REV = int(round(GEAR_RATIO * ENCODER_CPR_MOTOR_SHAFT_X4 * (DECODING_FACTOR / 4.0)))
 
     if args.both:
-        left_motor = TestMotor(MOTOR_LEFT_A, encoder_pins=ENCODER_LEFT_A, name="LEFT_A")
-        right_motor = TestMotor(MOTOR_RIGHT_B, encoder_pins=ENCODER_RIGHT_B, name="RIGHT_B")
+        left_motor = TestMotor(MOTOR_LEFT_A, encoder_pins=ENCODER_LEFT, name="ENCODER_LEFT")
+        right_motor = TestMotor(MOTOR_RIGHT_B, encoder_pins=ENCODER_RIGHT, name="ENCODER_RIGHT")
 
         logger.info(f"SPINNING BOTH MOTORS FORWARDS FOR 2 SECONDS @ {speed:.0f}%")
         steps_left_fwd, steps_right_fwd = spin_both(left_motor, right_motor, 2.0, forward=True, speed_percent=speed)
@@ -429,14 +433,14 @@ def main():
         logger.info(f"SPINNING BOTH MOTORS BACKWARDS FOR 2 SECONDS @ {speed:.0f}%")
         steps_left_rev, steps_right_rev = spin_both(left_motor, right_motor, 2.0, forward=False, speed_percent=speed)
     else:
-        left_motor = TestMotor(MOTOR_LEFT_A, encoder_pins=ENCODER_LEFT_A, name="LEFT_A")
+        left_motor = TestMotor(MOTOR_LEFT_A, encoder_pins=ENCODER_LEFT, name="ENCODER_LEFT")
         logger.info(f'SPINNING MOTOR LEFT A FORWARDS FOR 2 SECONDS @ {speed:.0f}%')
         steps_left_fwd = left_motor.spin_forward(2.0, speed_percent=speed)
         time.sleep(2.0)
         logger.info(f'SPINNING MOTOR LEFT A BACKWARDS FOR 2 SECONDS @ {speed:.0f}%')
         steps_left_rev = left_motor.spin_backward(2.0, speed_percent=speed)
 
-        right_motor = TestMotor(MOTOR_RIGHT_B, encoder_pins=ENCODER_RIGHT_B, name="RIGHT_B")
+        right_motor = TestMotor(MOTOR_RIGHT_B, encoder_pins=ENCODER_RIGHT, name="ENCODER_RIGHT")
         logger.info(f'SPINNING MOTOR RIGHT B FORWARDS FOR 2 SECONDS @ {speed:.0f}%')
         steps_right_fwd = right_motor.spin_forward(2.0, speed_percent=speed)
         time.sleep(2.0)

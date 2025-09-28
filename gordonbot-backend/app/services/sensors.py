@@ -34,8 +34,8 @@ def get_sensor_status() -> SensorsStatus:
     # Encoders: left and right
     try:
         left = get_left_encoder(
-            settings.encoder_left_a,
-            settings.encoder_left_b,
+            settings.encoder_left_pa,
+            settings.encoder_left_pb,
             settings.encoder_counts_per_rev_output,
             settings.wheel_diameter_m,
         )
@@ -48,8 +48,8 @@ def get_sensor_status() -> SensorsStatus:
         left_spd_mm_s = left.speed_mm_s() if left_connected else None
 
         right = get_right_encoder(
-            settings.encoder_right_a,
-            settings.encoder_right_b,
+            settings.encoder_right_pa,
+            settings.encoder_right_pb,
             settings.encoder_counts_per_rev_output,
             settings.wheel_diameter_m,
         )

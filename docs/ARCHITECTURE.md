@@ -159,10 +159,10 @@ Defined in `gordonbot-backend/app/core/config.py` and `gordonbot-backend/.env`.
 
 ### Encoders
 
-- Hardware: Pololu micro metal gearmotor with integrated 2‑channel Hall encoder (12 CPR on motor shaft) with ~100:1 gearbox → ~1204 counts per output shaft revolution.
-- Wiring (first encoder): Channel A → GPIO 17, Channel B → GPIO 27.
-- Backend: `services/encoder.py` uses `gpiozero.RotaryEncoder` if available; exposed via `GET /api/sensors/status` in `encoders.left` with fields `ticks`, `distance_m`, and `rpm`.
-- Calibration: `ENCODER_COUNTS_PER_REV_OUTPUT` (default `1204`) and `WHEEL_DIAMETER_M` (default `0.03`) in backend `.env`.
+- Hardware: Pololu micro metal gearmotor with integrated 2-channel Hall encoder (12 CPR on the motor shaft) paired with a ~100:1 gearbox, yielding ~1204 counts per output shaft revolution.
+- Wiring: `ENCODER_RIGHT_PA` → GPIO 12, `ENCODER_RIGHT_PB` → GPIO 26; `ENCODER_LEFT_PA` → GPIO 22, `ENCODER_LEFT_PB` → GPIO 27.
+- Backend: `services/encoder.py` implements an interrupt-driven quadrature decoder (prefers `lgpio`, falls back to `RPi.GPIO`) and surfaces metrics via `GET /api/sensors/status` in `encoders.right` and `encoders.left`.
+- Calibration knobs live in the backend `.env`: `ENCODER_COUNTS_PER_REV_OUTPUT` (default `1204`), `WHEEL_DIAMETER_M` (default `0.03`), and optional per-direction scale factors.
 
 ## Dev, Build, and Run
 
