@@ -35,9 +35,22 @@ type cfg struct {
     whepHTTPPort   int
     rtspPort       int
     apiHost        string
+    backendAccessLog bool
 }
 
 func getenv(key, def string) string { v := os.Getenv(key); if v=="" { return def }; return v }
+
+func getenvBool(key string, def bool) bool {
+    if v := os.Getenv(key); v != "" {
+        switch strings.ToLower(strings.TrimSpace(v)) {
+        case "1", "true", "yes", "on":
+            return true
+        case "0", "false", "no", "off":
+            return false
+        }
+    }
+    return def
+}
 
 func getenvInt(key string, def int) int {
     if v := os.Getenv(key); v != "" { if n, err := strconv.Atoi(v); err == nil { return n } }
@@ -67,7 +80,16 @@ func loadCfg() cfg {
         whepHTTPPort: getenvInt("MEDIAMTX_HTTP_PORT", 8889),
         rtspPort:     getenvInt("MEDIAMTX_RTSP_PORT", 8554),
         apiHost:      getenv("GORDONMON_API_HOST", "127.0.0.1"),
+        backendAccessLog: getenvBool("GORDONMON_BACKEND_ACCESS_LOG", false),
     }
+}
+
+func backendUvicornCommand(c cfg) string {
+    cmd := fmt.Sprintf("uvicorn app.main:app --host 0.0.0.0 --port %d --reload", c.backendPort)
+    if !c.backendAccessLog {
+        cmd += " --no-access-log --log-level warning"
+    }
+    return cmd
 }
 
 // ---------- Process management ----------
@@ -353,11 +375,12 @@ func startAllCmd(c cfg) tea.Cmd {
         }
 
         // Backend
+        backendArgs := backendUvicornCommand(c)
         beCmd := ""
         if _, err := os.Stat(filepath.Join(c.backendDir, ".venv", "bin", "activate")); err == nil {
-            beCmd = "source .venv/bin/activate && stdbuf -oL -eL uvicorn app.main:app --host 0.0.0.0 --port " + strconv.Itoa(c.backendPort) + " --reload"
+            beCmd = "source .venv/bin/activate && stdbuf -oL -eL " + backendArgs
         } else {
-            beCmd = "stdbuf -oL -eL uvicorn app.main:app --host 0.0.0.0 --port " + strconv.Itoa(c.backendPort) + " --reload"
+            beCmd = "stdbuf -oL -eL " + backendArgs
         }
         bp, beErr := startProcess("backend", beCmd, c.backendDir)
         if beErr != nil {
@@ -421,11 +444,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
             case "down", "j":
                 if m.modalIndex < len(levelNames())-1 { m.modalIndex++ }
                 return m, nil
-            case "enter":
-                m.applySelectedLevel(); return m, nil
+           case "enter":
+                cmd := m.applySelectedLevel()
+                return m, cmd
             case "1", "2", "3", "4", "5":
                 idx := int(key[0]-'1')
-                if idx >= 0 && idx < len(levelNames()) { m.modalIndex = idx; m.applySelectedLevel() }
+                if idx >= 0 && idx < len(levelNames()) {
+                    m.modalIndex = idx
+                    cmd := m.applySelectedLevel()
+                    return m, cmd
+                }
                 return m, nil
             }
         }
@@ -504,11 +532,12 @@ func restartBackendCmd(c cfg) tea.Cmd {
         // stop old if present
         procsMu.Lock(); old := procs["backend"]; procsMu.Unlock(); stopProcess(old)
         killPort(c.backendPort)
+        backendArgs := backendUvicornCommand(c)
         beCmd := ""
         if _, err := os.Stat(filepath.Join(c.backendDir, ".venv", "bin", "activate")); err == nil {
-            beCmd = "source .venv/bin/activate && stdbuf -oL -eL uvicorn app.main:app --host 0.0.0.0 --port " + strconv.Itoa(c.backendPort) + " --reload"
+            beCmd = "source .venv/bin/activate && stdbuf -oL -eL " + backendArgs
         } else {
-            beCmd = "stdbuf -oL -eL uvicorn app.main:app --host 0.0.0.0 --port " + strconv.Itoa(c.backendPort) + " --reload"
+            beCmd = "stdbuf -oL -eL " + backendArgs
         }
         if _, err := startProcess("backend", beCmd, c.backendDir); err != nil {
             return startedMsg{what: "backend", ok: false, err: err}
@@ -703,12 +732,34 @@ func levelIndexFromThreshold(t int) int {
     }
 }
 
-func (m *model) applySelectedLevel() {
+func (m *model) applySelectedLevel() tea.Cmd {
     names := levelNames()
-    if m.modalIndex < 0 || m.modalIndex >= len(names) { return }
-    m.levelThreshold = levelValue(names[m.modalIndex])
+    if m.modalIndex < 0 || m.modalIndex >= len(names) { return nil }
+    selected := levelValue(names[m.modalIndex])
+    oldThreshold := m.levelThreshold
+    m.levelThreshold = selected
+    wantAccess := selected <= 10
+    var restartNeeded bool
+    if wantAccess != m.cfg.backendAccessLog {
+        restartNeeded = true
+        m.cfg.backendAccessLog = wantAccess
+    }
     m.showLevelModal = false
+    if !restartNeeded {
+        m.updateContent()
+        return nil
+    }
+    if oldThreshold != selected {
+        if wantAccess {
+            m.appendLog(fmt.Sprintf("%s Backend access log enabled (DEBUG level)", tagStart))
+        } else {
+            m.appendLog(fmt.Sprintf("%s Backend access log disabled", tagStart))
+        }
+    }
+    m.status = "restarting"
+    m.starting = true
     m.updateContent()
+    return restartBackendCmd(m.cfg)
 }
 
 func (m model) levelModalView() string {

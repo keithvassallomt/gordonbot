@@ -33,6 +33,8 @@ export default function CameraPanel() {
   const [decoderMode, setDecoderMode] = useState<"cpu" | "hailo" | null>(null)
   const [rawFeedActive, setRawFeedActive] = useState(false)
   const [rawFeedStartSupported, setRawFeedStartSupported] = useState(true)
+  const [initialising, setInitialising] = useState(true)
+  const autoStartTimeoutRef = useRef<number | null>(null)
 
   /**
    * Start local demo mode using the device camera.
@@ -81,6 +83,7 @@ export default function CameraPanel() {
     } catch {}
     pcRef.current = null
     setStreamTech("None")
+    setInitialising(false)
     if (!keepRawPublisher && rawFeedActive) {
       await stopRawFeed()
     }
@@ -109,9 +112,16 @@ export default function CameraPanel() {
     }
   }
 
-  const startWebRTC = async () => {
-    if (!whepUrl) return
-    if (pcRef.current) return
+  const startWebRTC = async ({ auto = false }: { auto?: boolean } = {}) => {
+    if (!whepUrl) return false
+    if (pcRef.current) return true
+    if (autoStartTimeoutRef.current !== null) {
+      window.clearTimeout(autoStartTimeoutRef.current)
+      autoStartTimeoutRef.current = null
+    }
+    if (!auto) {
+      setInitialising(false)
+    }
     setConnecting(true)
     try {
       await ensureRawFeed()
@@ -172,12 +182,18 @@ export default function CameraPanel() {
       setActive(true)
       setStreamTech("WebRTC")
       if (streamKind === "raw") setRawFeedActive(true)
+      setInitialising(false)
+      return true
     } catch {
       // Reset state on error
       try { pcRef.current?.close() } catch {}
       pcRef.current = null
       setActive(false)
       setStreamTech("None")
+      if (auto) {
+        setInitialising(true)
+      }
+      return false
     } finally {
       setConnecting(false)
     }
@@ -210,14 +226,38 @@ export default function CameraPanel() {
     }
   }, [])
 
-  // Auto-connect to WebRTC on mount if available
+  // Auto-connect to WebRTC after a short delay so the dashboard can stabilise.
   useEffect(() => {
-    if (whepUrl && !active && !connecting && !pcRef.current) {
-      // Fire and forget; internal guards prevent double-start
-      void startWebRTC()
+    if (!whepUrl) {
+      setInitialising(false)
+      return () => { void stop() }
     }
-    // On unmount, ensure we stop any active stream
+    let cancelled = false
+    const initialDelayMs = 2500
+    const retryDelayMs = 3000
+
+    const scheduleAttempt = (delay: number) => {
+      if (cancelled) return
+      autoStartTimeoutRef.current = window.setTimeout(async () => {
+        autoStartTimeoutRef.current = null
+        if (cancelled || pcRef.current) {
+          return
+        }
+        const success = await startWebRTC({ auto: true })
+        if (!success && !cancelled) {
+          scheduleAttempt(retryDelayMs)
+        }
+      }, delay)
+    }
+
+    scheduleAttempt(initialDelayMs)
+
     return () => {
+      cancelled = true
+      if (autoStartTimeoutRef.current !== null) {
+        window.clearTimeout(autoStartTimeoutRef.current)
+        autoStartTimeoutRef.current = null
+      }
       void stop()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -275,7 +315,7 @@ export default function CameraPanel() {
           <div className="flex gap-2">
             {VIDEO_WHEP_BASE ? (
               !active ? (
-                <Button size="sm" onClick={startWebRTC} disabled={connecting}>
+                <Button size="sm" onClick={() => { void startWebRTC() }} disabled={connecting}>
                   {connecting ? "Connecting..." : "Connect"}
                 </Button>
               ) : (
@@ -309,6 +349,14 @@ export default function CameraPanel() {
               {/* Optional local demo overlay */}
               <video ref={videoRef} className={`absolute inset-0 h-full w-full ${videoObjectClass}`} playsInline muted style={{ display: active ? 'block' : 'none' }} />
             </>
+          )}
+          {(whepUrl && (initialising || connecting)) && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/60 text-white">
+              <div className="h-9 w-9 animate-spin rounded-full border-2 border-white/40 border-t-transparent" />
+              <p className="text-sm font-medium">
+                {initialising ? "Initialising camera feed" : "Connecting to camera"}
+              </p>
+            </div>
           )}
         </div>
       </CardContent>

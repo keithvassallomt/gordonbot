@@ -22,10 +22,23 @@ from app.services.voice_interaction import VoiceInteractionController
 
 log = logging.getLogger(__name__)
 
+
+class AccessLogToDebugFilter(logging.Filter):
+    """Downgrade uvicorn access logs to DEBUG so they disappear in normal mode."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.name.startswith("uvicorn.access"):
+            record.levelno = logging.DEBUG
+            record.levelname = "DEBUG"
+        return True
+
+
 def _setup_logging() -> None:
     # Configure a consistent console logger for the backend and uvicorn
     # Format: time level [backend] [logger] message
     fmt = "%(asctime)s %(levelname)s [backend] [%(name)s] %(message)s"
+    access_level = "DEBUG" if settings.verbose else "WARNING"
+
     config = {
         "version": 1,
         "disable_existing_loggers": False,
@@ -40,11 +53,21 @@ def _setup_logging() -> None:
                 "stream": "ext://sys.stdout",
             },
         },
+        "filters": {
+            "downgrade_uvicorn_access": {
+                "()": "app.main.AccessLogToDebugFilter",
+            }
+        },
         "loggers": {
             # Uvicorn server and access logs
             "uvicorn": {"handlers": ["console"], "level": "INFO", "propagate": False},
             "uvicorn.error": {"handlers": ["console"], "level": "INFO", "propagate": False},
-            "uvicorn.access": {"handlers": ["console"], "level": "INFO", "propagate": False},
+            "uvicorn.access": {
+                "handlers": ["console"],
+                "level": access_level,
+                "propagate": False,
+                "filters": ["downgrade_uvicorn_access"],
+            },
         },
         "root": {"handlers": ["console"], "level": "DEBUG" if settings.verbose else "INFO"},
     }
