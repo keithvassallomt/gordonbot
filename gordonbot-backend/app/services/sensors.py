@@ -10,13 +10,11 @@ from app.schemas import (
     EncoderData,
     ToFData,
     BNO055Data,
-    EulerDeg,
-    Quaternion,
-    Vector3,
 )
 from app.core.config import settings
 from app.services.encoder import get_left_encoder, get_right_encoder
 from app.services.tof import read_distance_mm
+from app.services.bno055 import read_bno055
 
 log = logging.getLogger(__name__)
 
@@ -92,19 +90,11 @@ def get_sensor_status() -> SensorsStatus:
     except Exception as e:
         log.debug("ToF read failed: %s", e)
 
-    # BNO055 IMU (stub)
+    # BNO055 IMU
     try:
-        bno = BNO055Data(
-            euler=EulerDeg(roll=None, pitch=None, yaw=None),
-            quat=Quaternion(w=None, x=None, y=None, z=None),
-            ang_vel_rad_s=Vector3(x=None, y=None, z=None),
-            accel_m_s2=Vector3(x=None, y=None, z=None),
-            mag_uT=Vector3(x=None, y=None, z=None),
-            lin_accel_m_s2=Vector3(x=None, y=None, z=None),
-            gravity_m_s2=Vector3(x=None, y=None, z=None),
-            temp_c=None,
-        )
+        bno = read_bno055()
     except Exception as e:
         log.debug("BNO055 read failed: %s", e)
+        bno = None
 
     return SensorsStatus(ts=ts_ms, encoders=encoders, tof=tof, bno055=bno)

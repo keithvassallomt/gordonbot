@@ -1,5 +1,6 @@
 adafruit-blinka==8.66.2
 adafruit-circuitpython-vl53l1x==1.2.5
+adafruit-circuitpython-bno055==5.4.20
 annotated-types==0.7.0
 anyio==4.10.0
 argcomplete==2.0.0
