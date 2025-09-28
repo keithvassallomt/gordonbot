@@ -16,6 +16,7 @@ from app.schemas import (
 )
 from app.core.config import settings
 from app.services.encoder import get_left_encoder, get_right_encoder
+from app.services.tof import read_distance_mm
 
 log = logging.getLogger(__name__)
 
@@ -83,9 +84,11 @@ def get_sensor_status() -> SensorsStatus:
     except Exception as e:
         log.debug("Encoders read failed: %s", e)
 
-    # ToF distance sensor (stub)
+    # ToF distance sensor
     try:
-        tof = ToFData(distance_mm=None)
+        distance_mm = read_distance_mm()
+        if distance_mm is not None:
+            tof = ToFData(distance_mm=distance_mm)
     except Exception as e:
         log.debug("ToF read failed: %s", e)
 

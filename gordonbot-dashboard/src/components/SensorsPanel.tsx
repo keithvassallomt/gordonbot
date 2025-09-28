@@ -29,6 +29,7 @@ export default function SensorsPanel() {
   const speeds = [speedLeft, speedRight].filter((v): v is number => typeof v === "number")
   const speedAvg = speeds.length ? speeds.reduce((a,b)=>a+b,0)/speeds.length : undefined
   const maxSpeed = 500 // mm/s, adjust if you know your top speed
+  const obstacleDistanceMm = data?.tof?.distance_mm
 
   // Average distance travelled (mm) from both encoders (signed)
   const distLeftMm = (() => {
@@ -46,7 +47,7 @@ export default function SensorsPanel() {
   const dists = [distLeftMm, distRightMm].filter((v): v is number => typeof v === 'number')
   const distAvgMm = dists.length ? dists.reduce((a,b)=>a+b,0)/dists.length : undefined
 
-  function SpeedGauge({ value, max, distanceMm }: { value?: number; max: number; distanceMm?: number }) {
+  function SpeedGauge({ value, max, distanceTravelledMm, obstacleMm }: { value?: number; max: number; distanceTravelledMm?: number; obstacleMm?: number }) {
     const v = Math.max(0, Math.min(max, value ?? 0))
     const pct = v / max
     const angle = Math.round(180 * pct) // 0..180deg
@@ -60,7 +61,8 @@ export default function SensorsPanel() {
         <div className="min-w-[80px] text-right">
           <div className="font-mono text-xl">{fmt(value, "mm/s", 0)}</div>
           <div className="text-xs text-muted-foreground">max {max} mm/s</div>
-          <div className="text-xs text-muted-foreground">{distanceMm != null ? `avg dist ${distanceMm.toFixed(0)} mm` : 'avg dist —'}</div>
+          <div className="text-xs text-muted-foreground">{obstacleMm != null ? `closest ${obstacleMm.toFixed(0)} mm` : "closest —"}</div>
+          <div className="text-xs text-muted-foreground">{distanceTravelledMm != null ? `avg dist ${distanceTravelledMm.toFixed(0)} mm` : "avg dist —"}</div>
         </div>
       </div>
     )
@@ -82,7 +84,7 @@ export default function SensorsPanel() {
         {/* Speed gauge */}
         <div className="flex items-center justify-between rounded-md border p-3">
           <div className="flex items-center gap-2 text-muted-foreground"><Gauge className="h-4 w-4"/> Speed</div>
-          <SpeedGauge value={speedAvg} max={maxSpeed} distanceMm={distAvgMm} />
+          <SpeedGauge value={speedAvg} max={maxSpeed} distanceTravelledMm={distAvgMm} obstacleMm={obstacleDistanceMm} />
         </div>
 
         {/* Encoders */}

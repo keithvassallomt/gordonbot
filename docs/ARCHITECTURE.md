@@ -30,6 +30,7 @@ gordonbot-backend/
       camera.py           # Camera capture, encoding, detection, RTSP publishers
       battery.py          # Battery stat reader
       diagnostics.py      # System metrics
+      tof.py              # VL53L1X time-of-flight distance sensor
     sockets/              # WebSockets
       control.py          # /ws/control — tank drive commands
     main.py               # FastAPI app composition & startup hooks
@@ -85,7 +86,7 @@ Entrypoint: `gordonbot-backend/app/main.py`
 - `GET /api/diag/system` → JSON with CPU, memory, temps, uptime, throttling, etc.
 - `GET /api/video/snapshot.jpg` → current JPEG frame from the camera.
 - `POST /api/video/whep/{stream}` → Proxies `application/sdp` offer to MediaMTX, returns `application/sdp` answer. CORS preflight supported via `OPTIONS`.
-- `GET /api/sensors/status` → Consolidated sensor snapshot (encoders, ToF, BNO055). Optional fields if hardware absent.
+- `GET /api/sensors/status` → Consolidated sensor snapshot (encoders, ToF, BNO055). Optional fields if hardware absent. When a VL53L1X is present the backend streams live distance readings via the ToF service.
 
 ### WebSocket: `/ws/control`
 
@@ -152,7 +153,7 @@ Defined in `gordonbot-backend/app/core/config.py` and `gordonbot-backend/.env`.
 - Key modules:
   - `components/config.ts`: constants including `VIDEO_WHEP_BASE = "/api/video/whep/"`, streams `gordon` and `gordon-annot`.
 - `CameraPanel.tsx`: snapshot endpoint and WHEP WebRTC playback via backend proxy.
-- `SensorsPanel.tsx`: polls `/api/sensors/status` and displays encoders, ToF, and BNO055 telemetry.
+- `SensorsPanel.tsx`: polls `/api/sensors/status` and displays encoders, ToF, and BNO055 telemetry. The speed gauge now shows both average wheel speed and the closest obstacle distance reported by the VL53L1X.
   - `ControlPanel.tsx`: joystick + keyboard → WebSocket `/ws/control` client.
   - `DiagnosticsPanel.tsx`: queries `GET /api/diag/system` and displays metrics.
 

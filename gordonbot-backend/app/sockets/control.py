@@ -6,7 +6,20 @@ from app.services.drive_state import set_drive as _set_drive_state
 import asyncio
 import time
 import logging
-import contextlib
+import contextlib   
+
+# lgpio 0.2.2.0 (latest release) lacks the SET_BIAS_* constants that
+# gpiozero >=2.0 expects; alias them to the older SET_PULL_* names so the
+# lgpio pin factory stays usable until an upstream release adds them.
+try:  # pragma: no cover - hardware-specific adapter
+    import lgpio  # type: ignore
+except Exception:
+    lgpio = None  # type: ignore
+else:
+    if hasattr(lgpio, "SET_PULL_NONE") and not hasattr(lgpio, "SET_BIAS_DISABLE"):
+        lgpio.SET_BIAS_DISABLE = lgpio.SET_PULL_NONE  # type: ignore[attr-defined]
+        lgpio.SET_BIAS_PULL_UP = lgpio.SET_PULL_UP  # type: ignore[attr-defined]
+        lgpio.SET_BIAS_PULL_DOWN = lgpio.SET_PULL_DOWN  # type: ignore[attr-defined]
 
 router = APIRouter()
 
