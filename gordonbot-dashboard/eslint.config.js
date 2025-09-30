@@ -10,7 +10,6 @@ export default tseslint.config([
   globalIgnores(['dist']),
   {
     files: ['**/*.{ts,tsx}'],
-    plugins: { import: importPlugin },
     settings: {
       'import/resolver': {
         typescript: true,
@@ -32,6 +31,7 @@ export default tseslint.config([
       'import/order': ['warn', { 'newlines-between': 'always' }],
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
       '@typescript-eslint/consistent-type-imports': ['warn', { prefer: 'type-imports' }],
+      'react-refresh/only-export-components': 'off',
     },
   },
 ])

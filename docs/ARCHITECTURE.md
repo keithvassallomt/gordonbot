@@ -153,7 +153,7 @@ Defined in `gordonbot-backend/app/core/config.py` and `gordonbot-backend/.env`.
 - Key modules:
   - `components/config.ts`: constants including `VIDEO_WHEP_BASE = "/api/video/whep/"`, streams `gordon` and `gordon-annot`.
 - `CameraPanel.tsx`: snapshot endpoint and WHEP WebRTC playback via backend proxy.
-- `SensorsPanel.tsx`: polls `/api/sensors/status` and displays encoders, ToF, and BNO055 telemetry. The speed gauge now shows both average wheel speed and the closest obstacle distance reported by the VL53L1X.
+- `NavigationPanel.tsx`: polls `/api/sensors/status` and drives a navigation card (speed, distance, compass heading) plus a separate sensors card with collapsible Encoders and BNO055 telemetry sections.
   - `ControlPanel.tsx`: joystick + keyboard → WebSocket `/ws/control` client.
   - `DiagnosticsPanel.tsx`: queries `GET /api/diag/system` and displays metrics.
 

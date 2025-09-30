@@ -79,11 +79,19 @@ export function useControlTransport(path = CONTROL_WS_PATH) {
     // if still CONNECTING, close immediately after it opens instead of during handshake.
     if (ws.readyState === WebSocket.CONNECTING) {
       const handleOpen = () => {
-        try { ws.close() } catch {}
+        try {
+          ws.close()
+        } catch (err) {
+          console.debug("disconnect: failed to close CONNECTING socket", err)
+        }
       }
       ws.addEventListener("open", handleOpen, { once: true })
     } else {
-      try { ws.close() } catch {}
+      try {
+        ws.close()
+      } catch (err) {
+        console.debug("disconnect: failed to close socket", err)
+      }
     }
 
     wsRef.current = null

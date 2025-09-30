@@ -6,7 +6,7 @@ import { Camera, Map as MapIcon } from "lucide-react"
 
 import TopBar from "./TopBar"
 import CameraPanel from "./CameraPanel"
-import SensorsPanel from "./SensorsPanel"
+import NavigationPanel from "./NavigationPanel"
 import MapCanvas from "./MapCanvas";
 import BatteryPanel from "./BatteryPanel";
 import DiagnosticsPanel from "./DiagnosticsPanel"
@@ -76,7 +76,7 @@ export default function GordonBotDashboard() {
               <TabsContent value="camera" className="mt-3">
                 <CameraPanel />
                 <div className="mt-4">
-                  <SensorsPanel />
+                  <NavigationPanel />
                 </div>
               </TabsContent>
               <TabsContent value="map" className="mt-3">

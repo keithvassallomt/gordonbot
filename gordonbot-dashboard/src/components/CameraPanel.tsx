@@ -80,7 +80,9 @@ export default function CameraPanel() {
     setActive(false)
     try {
       pcRef.current?.close()
-    } catch {}
+    } catch (err) {
+      console.debug("camera stop: failed to close peer connection", err)
+    }
     pcRef.current = null
     setStreamTech("None")
     setInitialising(false)
@@ -184,9 +186,14 @@ export default function CameraPanel() {
       if (streamKind === "raw") setRawFeedActive(true)
       setInitialising(false)
       return true
-    } catch {
+    } catch (err) {
       // Reset state on error
-      try { pcRef.current?.close() } catch {}
+      console.debug("camera start: WebRTC negotiation failed", err)
+      try {
+        pcRef.current?.close()
+      } catch (closeErr) {
+        console.debug("camera start: cleanup close failed", closeErr)
+      }
       pcRef.current = null
       setActive(false)
       setStreamTech("None")

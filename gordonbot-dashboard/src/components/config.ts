@@ -8,7 +8,14 @@
 // During dev, backend is on 127.0.0.1:8000 and frontend on 127.0.0.1:5173
 // Point API_BASE to the backend to avoid 404s from the Vite dev server.
 // Override via Vite env: VITE_API_BASE="http://192.168.x.x:8000" for LAN testing.
-export const API_BASE = (import.meta as any).env?.VITE_API_BASE || "http://192.168.96.187:8000"
+type ImportMetaWithOptionalEnv = ImportMeta & {
+  readonly env?: {
+    readonly VITE_API_BASE?: string
+  }
+}
+
+const envApiBase = (import.meta as ImportMetaWithOptionalEnv).env?.VITE_API_BASE
+export const API_BASE = envApiBase && envApiBase.length > 0 ? envApiBase : "http://192.168.96.187:8000"
 /**
  * REST endpoint path for battery telemetry data.
  */
