@@ -134,6 +134,9 @@ export default function CameraPanel() {
       const stream = new MediaStream()
       if (videoRef.current) {
         videoRef.current.srcObject = stream
+        // Low-latency video element hints
+        // @ts-expect-error latencyHint is experimental but widely supported
+        videoRef.current.latencyHint = "interactive"
       }
       pc.addTransceiver("video", { direction: "recvonly" })
       pc.ontrack = (ev) => {
@@ -145,6 +148,7 @@ export default function CameraPanel() {
       await pc.setLocalDescription(offer)
 
       // Wait for ICE gathering to complete (no trickle for simplicity)
+      // Reduced timeout for lower latency (500ms vs 1500ms)
       await new Promise<void>((resolve) => {
         if (pc.iceGatheringState === "complete") {
           resolve()
@@ -156,11 +160,11 @@ export default function CameraPanel() {
             }
           }
           pc.addEventListener("icegatheringstatechange", check)
-          // Fallback timeout
+          // Fallback timeout (reduced for lower latency)
           setTimeout(() => {
             pc.removeEventListener("icegatheringstatechange", check)
             resolve()
-          }, 1500)
+          }, 500)
         }
       })
 

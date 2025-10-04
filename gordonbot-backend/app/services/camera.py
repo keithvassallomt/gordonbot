@@ -220,10 +220,12 @@ class Camera:
                 import subprocess, shlex
 
                 # Launch ffmpeg to read raw H.264 from stdin and push to RTSP
+                # Low-latency: UDP transport for WiFi 6E
                 cmd = [
-                    "ffmpeg", "-loglevel", "warning", "-re",
+                    "ffmpeg", "-loglevel", "warning",
                     "-f", "h264", "-i", "-",
                     "-c", "copy",
+                    "-rtsp_transport", "udp",
                     "-f", "rtsp", rtsp_url,
                 ]
                 self._ffmpeg_proc = subprocess.Popen(
@@ -233,7 +235,8 @@ class Camera:
                     log.error("Failed to start ffmpeg subprocess for RTSP publish")
                     return False
 
-                encoder = H264Encoder(bitrate=bitrate)
+                # Low-latency encoder: baseline profile (no B-frames), repeat SPS/PPS, keyframe every 1s
+                encoder = H264Encoder(bitrate=bitrate, repeat=True, iperiod=15, profile="baseline")
                 sink = FileOutput(self._ffmpeg_proc.stdin)
                 self._picam.start_recording(encoder, sink, name="main")
                 self._publishing = True
