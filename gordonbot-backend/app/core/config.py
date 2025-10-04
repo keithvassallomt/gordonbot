@@ -29,6 +29,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[2]
 class Settings(BaseModel):
     api_prefix: str = "/api"
     control_ws_path: str = "/ws/control"
+    orientation_ws_path: str = "/ws/orientation"
     verbose: bool = _getenv_bool("VERBOSE", False)
     camera_rtsp_url: str | None = os.getenv("CAMERA_RTSP_URL")
     camera_bitrate: int = int(os.getenv("CAMERA_BITRATE", "2000000"))
@@ -80,6 +81,7 @@ class Settings(BaseModel):
     encoder_counts_per_rev_output: int = int(os.getenv("ENCODER_COUNTS_PER_REV_OUTPUT", "1204"))
     # Wheel diameter in meters (front drive wheel, 3 cm)
     wheel_diameter_m: float = float(os.getenv("WHEEL_DIAMETER_M", "0.03"))
+    track_thickness_m: float = float(os.getenv("TRACK_THICKNESS", "0.002"))
     # Encoder GPIO pins (BCM) for right/left motors (Phase A/B)
     encoder_right_pa: int = int(os.getenv("ENCODER_RIGHT_PA", "12"))
     encoder_right_pb: int = int(os.getenv("ENCODER_RIGHT_PB", "26"))
@@ -192,6 +194,11 @@ class Settings(BaseModel):
     voice_reply_system_prompt: str = os.getenv(
         "VOICE_REPLY_SYSTEM_PROMPT",
         "You are the voice of GordonBot. Provide concise, helpful spoken answers.",
+    )
+
+    bno055_calibration_path: str = os.getenv(
+        "BNO055_CALIBRATION_PATH",
+        str(BACKEND_ROOT / "assets" / "calibration" / "bno055_offsets.json"),
     )
 
 # Simple settings instance (expand later for env vars)

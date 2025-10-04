@@ -109,6 +109,12 @@ export type BNO055Data = {
   lin_accel_m_s2?: Vector3
   gravity_m_s2?: Vector3
   temp_c?: number
+  calibration?: {
+    sys?: number
+    gyro?: number
+    accel?: number
+    mag?: number
+  }
 }
 
 export type ToFData = { distance_mm?: number }

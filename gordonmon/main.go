@@ -36,6 +36,39 @@ type cfg struct {
 	rtspPort         int
 	apiHost          string
 	backendAccessLog bool
+	backendLogLevel  string
+}
+
+type persistedState struct {
+	BackendLogLevel string `json:"backend_log_level,omitempty"`
+}
+
+func stateFilePath(root string) string {
+	return filepath.Join(root, "gordonmon", "state.json")
+}
+
+func loadPersistedLogLevel(root string) string {
+	path := stateFilePath(root)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var st persistedState
+	if err := json.Unmarshal(data, &st); err != nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(st.BackendLogLevel))
+}
+
+func savePersistedLogLevel(root, level string) {
+	path := stateFilePath(root)
+	st := persistedState{BackendLogLevel: strings.ToLower(strings.TrimSpace(level))}
+	data, err := json.MarshalIndent(st, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(path), 0o755)
+	_ = os.WriteFile(path, data, 0o644)
 }
 
 func getenv(key, def string) string {
@@ -79,6 +112,15 @@ func detectRoot() string {
 
 func loadCfg() cfg {
 	root := detectRoot()
+	persistedLevel := loadPersistedLogLevel(root)
+	envLevel := strings.ToLower(strings.TrimSpace(getenv("GORDONMON_BACKEND_LOG_LEVEL", "")))
+	selectedLevel := persistedLevel
+	if selectedLevel == "" {
+		selectedLevel = envLevel
+	}
+	if selectedLevel == "" {
+		selectedLevel = "info"
+	}
 	return cfg{
 		root:             root,
 		backendDir:       getenv("BACKEND_DIR", filepath.Join(root, "gordonbot-backend")),
@@ -91,13 +133,18 @@ func loadCfg() cfg {
 		rtspPort:         getenvInt("MEDIAMTX_RTSP_PORT", 8554),
 		apiHost:          getenv("GORDONMON_API_HOST", "127.0.0.1"),
 		backendAccessLog: getenvBool("GORDONMON_BACKEND_ACCESS_LOG", false),
+		backendLogLevel:  selectedLevel,
 	}
 }
 
 func backendUvicornCommand(c cfg) string {
-	cmd := fmt.Sprintf("uvicorn app.main:app --host 0.0.0.0 --port %d --reload", c.backendPort)
+	level := strings.ToLower(strings.TrimSpace(c.backendLogLevel))
+	if level == "" {
+		level = "info"
+	}
+	cmd := fmt.Sprintf("uvicorn app.main:app --host 0.0.0.0 --port %d --reload --log-level %s", c.backendPort, level)
 	if !c.backendAccessLog {
-		cmd += " --no-access-log --log-level warning"
+		cmd += " --no-access-log"
 	}
 	return cmd
 }
@@ -763,6 +810,23 @@ func levelValue(name string) int {
 	}
 }
 
+func logLevelForName(name string) string {
+	switch strings.ToUpper(name) {
+	case "DEBUG":
+		return "debug"
+	case "INFO":
+		return "info"
+	case "WARN", "WARNING":
+		return "warning"
+	case "ERROR":
+		return "error"
+	case "CRITICAL", "FATAL":
+		return "critical"
+	default:
+		return "info"
+	}
+}
+
 var reLevel = regexp.MustCompile(`(?i)\b(DEBUG|INFO|WARN|WARNING|ERROR|CRITICAL|FATAL)\b`)
 
 func lineLevel(line string) int {
@@ -833,23 +897,40 @@ func (m *model) applySelectedLevel() tea.Cmd {
 	if m.modalIndex < 0 || m.modalIndex >= len(names) {
 		return nil
 	}
-	selected := levelValue(names[m.modalIndex])
-	oldThreshold := m.levelThreshold
-	m.levelThreshold = selected
-	wantAccess := selected <= 10
-	var restartNeeded bool
-	if wantAccess != m.cfg.backendAccessLog {
+	selectedName := names[m.modalIndex]
+	selectedValue := levelValue(selectedName)
+	prevThreshold := m.levelThreshold
+	prevAccess := m.cfg.backendAccessLog
+	prevLogLevel := m.cfg.backendLogLevel
+
+	m.levelThreshold = selectedValue
+	logLevel := logLevelForName(selectedName)
+	wantAccess := selectedValue <= 10
+
+	restartNeeded := false
+	if wantAccess != prevAccess {
 		restartNeeded = true
 		m.cfg.backendAccessLog = wantAccess
 	}
+	if logLevel != prevLogLevel {
+		restartNeeded = true
+		m.cfg.backendLogLevel = logLevel
+	}
+
 	m.showLevelModal = false
 	if !restartNeeded {
-		m.updateContent()
+		if prevThreshold != selectedValue {
+			m.updateContent()
+		}
 		return nil
 	}
-	if oldThreshold != selected {
+	if logLevel != prevLogLevel {
+		savePersistedLogLevel(m.cfg.root, logLevel)
+		m.appendLog(fmt.Sprintf("%s Backend log level set to %s", tagStart, strings.ToUpper(logLevel)))
+	}
+	if wantAccess != prevAccess {
 		if wantAccess {
-			m.appendLog(fmt.Sprintf("%s Backend access log enabled (DEBUG level)", tagStart))
+			m.appendLog(fmt.Sprintf("%s Backend access log enabled", tagStart))
 		} else {
 			m.appendLog(fmt.Sprintf("%s Backend access log disabled", tagStart))
 		}

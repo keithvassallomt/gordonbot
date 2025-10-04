@@ -14,7 +14,9 @@ from app.routers import diagnostics as diagnostics_router
 from app.routers import video as video_router
 from app.routers import sensors as sensors_router
 from app.routers import wakeword as wakeword_router
+from app.routers import orientation as orientation_router
 from app.sockets import control as control_socket
+from app.sockets import orientation as orientation_socket
 from app.services.camera import camera
 from app.services.audio_playback import AudioCuePlayer
 from app.services.wake_word import WakeWordService
@@ -113,11 +115,13 @@ api.include_router(diagnostics_router.router, prefix="")
 api.include_router(video_router.router, prefix="")
 api.include_router(sensors_router.router, prefix="")
 api.include_router(wakeword_router.router, prefix="")
+api.include_router(orientation_router.router, prefix="")
 
 app.mount(settings.api_prefix, api)
 
 # WebSocket (mounted on the root app, not under /api)
 app.include_router(control_socket.router)
+app.include_router(orientation_socket.router)
 
 # (Optional for deployment) Serve built frontend from ./dist
 # app.mount("/", StaticFiles(directory="dist", html=True), name="static")

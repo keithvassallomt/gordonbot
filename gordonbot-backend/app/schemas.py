@@ -72,6 +72,12 @@ class EulerDeg(BaseModel):
     pitch: Optional[float] = None
     yaw: Optional[float] = None
 
+class BNO055CalibrationStatus(BaseModel):
+    sys: Optional[int] = None
+    gyro: Optional[int] = None
+    accel: Optional[int] = None
+    mag: Optional[int] = None
+
 class BNO055Data(BaseModel):
     euler: Optional[EulerDeg] = None  # degrees
     quat: Optional[Quaternion] = None  # unit quaternion
@@ -81,6 +87,7 @@ class BNO055Data(BaseModel):
     lin_accel_m_s2: Optional[Vector3] = None
     gravity_m_s2: Optional[Vector3] = None
     temp_c: Optional[float] = None
+    calibration: Optional[BNO055CalibrationStatus] = None
 
 class ToFData(BaseModel):
     distance_mm: Optional[int] = None
@@ -90,6 +97,24 @@ class SensorsStatus(BaseModel):
     encoders: Optional[MotorEncoders] = None
     tof: Optional[ToFData] = None
     bno055: Optional[BNO055Data] = None
+
+
+class OrientationFrame(BaseModel):
+    type: str = "orientation"
+    ts: int
+    qw: Optional[float] = None
+    qx: Optional[float] = None
+    qy: Optional[float] = None
+    qz: Optional[float] = None
+    euler: Optional[EulerDeg] = None
+    calib: Optional[BNO055CalibrationStatus] = None
+    stale: bool = False
+
+
+class OrientationAck(BaseModel):
+    type: str
+    ok: bool
+    message: Optional[str] = None
 
 
 class WakeWordStatus(BaseModel):

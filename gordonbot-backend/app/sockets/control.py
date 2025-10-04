@@ -92,6 +92,51 @@ class MotorController:
 # Module-level singleton
 _motors = MotorController()
 
+# Shared command timestamp for watchdog + external controllers
+_LAST_COMMAND_TS = time.monotonic()
+
+
+def _shape(value: float) -> float:
+    return value * value * value
+
+
+def _update_last_command(ts: float | None = None) -> None:
+    global _LAST_COMMAND_TS
+    _LAST_COMMAND_TS = ts if ts is not None else time.monotonic()
+
+
+def seconds_since_last_command() -> float:
+    return time.monotonic() - _LAST_COMMAND_TS
+
+
+def process_drive_command(left: float, right: float, *, source: str = "unknown") -> tuple[float, float]:
+    """Apply clamping, shaping, and motor output. Keeps watchdog happy."""
+    left_clamped = max(-1.0, min(1.0, float(left)))
+    right_clamped = max(-1.0, min(1.0, float(right)))
+
+    shaped_left = _shape(left_clamped)
+    shaped_right = _shape(right_clamped)
+
+    _motors.set(left=shaped_left, right=shaped_right)
+    _set_drive_state(shaped_left, shaped_right)
+    _update_last_command()
+    log.debug(
+        "drive_cmd source=%s raw=(%.3f, %.3f) shaped=(%.3f, %.3f)",
+        source,
+        left_clamped,
+        right_clamped,
+        shaped_left,
+        shaped_right,
+    )
+    return shaped_left, shaped_right
+
+
+def stop_all_motors() -> None:
+    """Immediate hardware stop that also resets watchdog timestamp."""
+    _motors.stop()
+    _set_drive_state(0.0, 0.0)
+    _update_last_command()
+
 @router.websocket(settings.control_ws_path)
 async def ws_control(ws: WebSocket):
     await ws.accept()
@@ -99,18 +144,17 @@ async def ws_control(ws: WebSocket):
 
     # Dead-man timer: stop if no command within this window
     DEADMAN_SECONDS = 0.4
-    last_cmd = {"t": time.monotonic()}  # mutable holder for closure
     wd_state = {"tripped": False}
 
     async def watchdog():
         try:
             while True:
                 await asyncio.sleep(0.2)
-                if time.monotonic() - last_cmd["t"] > DEADMAN_SECONDS:
+                if seconds_since_last_command() > DEADMAN_SECONDS:
                     if not wd_state["tripped"]:
                         log.warning("watchdog: dead-man timeout %.1fs reached; stopping", DEADMAN_SECONDS)
                         wd_state["tripped"] = True
-                    _motors.stop()
+                    stop_all_motors()
                 else:
                     # Reset tripped flag once commands resume
                     if wd_state["tripped"]:
@@ -140,19 +184,8 @@ async def ws_control(ws: WebSocket):
             right = max(-1.0, min(1.0, msg.payload.right))
             _ts = msg.payload.ts
 
-            # Optional response curve to soften centre and give finer control
-            def shape(x: float) -> float:
-                # cubic curve preserves sign, emphasises small inputs
-                return x * x * x
-
-            shaped_left = shape(left)
-            shaped_right = shape(right)
+            shaped_left, shaped_right = process_drive_command(left, right, source="ws")
             log.debug("drive: raw=(%.3f, %.3f) shaped=(%.3f, %.3f) ts=%s", left, right, shaped_left, shaped_right, _ts)
-
-            # Drive motors and update shared drive state for encoder direction
-            _motors.set(left=shaped_left, right=shaped_right)
-            _set_drive_state(shaped_left, shaped_right)
-            last_cmd["t"] = time.monotonic()
 
             # Ack back to client (useful for latency/telemetry)
             ack = {
@@ -176,4 +209,4 @@ async def ws_control(ws: WebSocket):
         wd_task.cancel()
         with contextlib.suppress(Exception):
             await wd_task
-        _motors.stop()
+        stop_all_motors()

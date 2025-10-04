@@ -10,6 +10,7 @@ import NavigationPanel from "./NavigationPanel"
 import MapCanvas from "./MapCanvas";
 import BatteryPanel from "./BatteryPanel";
 import DiagnosticsPanel from "./DiagnosticsPanel"
+import OrientationPanel from "./OrientationPanel"
 import ControlPanel from "./ControlPanel";
 
 import { useBattery } from "./hooks/useBattery";
@@ -96,6 +97,7 @@ export default function GordonBotDashboard() {
           <aside className="lg:col-span-2 space-y-4">
             <ControlPanel transport={transport} />
             <BatteryPanel />
+            <OrientationPanel />
             <DiagnosticsPanel transport={transport} />
           </aside>
         </main>

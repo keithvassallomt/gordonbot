@@ -75,7 +75,7 @@ Entrypoint: `gordonbot-backend/app/main.py`
   - `battery` → latest battery telemetry
   - `diagnostics` → system metrics
   - `video` → snapshot and WHEP proxy
-- Includes WebSocket router `control` at `settings.control_ws_path` (default `/ws/control`) on the root app (not under `/api`).
+- Includes WebSocket router `control` at `settings.control_ws_path` (default `/ws/control`) and `orientation` at `settings.orientation_ws_path` (default `/ws/orientation`) on the root app (not under `/api`).
 - Startup hook optionally starts RTSP publishers to MediaMTX (raw and annotated) if corresponding env vars are set.
 
 ### REST API Endpoints (mounted under `/api`)
@@ -99,6 +99,14 @@ Entrypoint: `gordonbot-backend/app/main.py`
   - Errors: `{ "type": "error", "message": "..." }`
 - Safety: dead‑man watchdog (~0.4s). If no commands arrive, motors are stopped.
 
+### WebSocket: `/ws/orientation`
+
+- Purpose: stream BNO055 orientation quaternions and calibration status for the navigation UI.
+- Outgoing frames: `{ "type": "orientation", "ts": <ms epoch>, "qw": <float>, "qx": <float>, "qy": <float>, "qz": <float>, "euler": { roll, pitch, yaw }, "calib": { sys, gyro, accel, mag }, "stale": <bool> }`.
+- Commands (client → server): `{ "action": "start_calibration" }` to reset the IMU and launch a guided, low-speed calibration drive (figure-eight routine).
+- Server ack: `{ "type": "calibration", "ok": <bool>, "message"?: <string> }`. Errors surface as `{ "type": "error", "message": "..." }`.
+- Progress events: `{ "type": "calibration_run", "status": "started" }` and `{ "type": "calibration_complete", "ok": <bool> }`.
+
 ### Camera and Streaming
 
 Defined in `gordonbot-backend/app/services/camera.py`.
@@ -121,6 +129,7 @@ Defined in `gordonbot-backend/app/core/config.py` and `gordonbot-backend/.env`.
   - `CORS_ALLOW_ORIGIN_REGEX` → optional regex (used instead of the list)
 - Control WebSocket
   - `control_ws_path` → `/ws/control` (constant in code; change via code)
+  - `orientation_ws_path` → `/ws/orientation` (constant in code; change via code)
 - Media (RTSP/WHEP)
   - `CAMERA_RTSP_URL` → raw RTSP target
   - `CAMERA_RTSP_ANNOT_URL` → annotated RTSP target
@@ -154,6 +163,7 @@ Defined in `gordonbot-backend/app/core/config.py` and `gordonbot-backend/.env`.
   - `components/config.ts`: constants including `VIDEO_WHEP_BASE = "/api/video/whep/"`, streams `gordon` and `gordon-annot`.
 - `CameraPanel.tsx`: snapshot endpoint and WHEP WebRTC playback via backend proxy.
 - `NavigationPanel.tsx`: polls `/api/sensors/status` and drives a navigation card (speed, distance, compass heading) plus a separate sensors card with collapsible Encoders and BNO055 telemetry sections.
+- `OrientationPanel.tsx`: renders a Three.js cube driven by the `/ws/orientation` quaternion stream, shows derived heading/pitch/roll, calibration levels, recenter, and a scripted calibration control that orchestrates the backend figure-eight routine.
   - `ControlPanel.tsx`: joystick + keyboard → WebSocket `/ws/control` client.
   - `DiagnosticsPanel.tsx`: queries `GET /api/diag/system` and displays metrics.
 

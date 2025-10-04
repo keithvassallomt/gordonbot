@@ -11,11 +11,15 @@
 type ImportMetaWithOptionalEnv = ImportMeta & {
   readonly env?: {
     readonly VITE_API_BASE?: string
+    readonly VITE_DASHBOARD_DEBUG?: string
   }
 }
 
 const envApiBase = (import.meta as ImportMetaWithOptionalEnv).env?.VITE_API_BASE
 export const API_BASE = envApiBase && envApiBase.length > 0 ? envApiBase : "http://192.168.96.187:8000"
+
+const envDebugMode = (import.meta as ImportMetaWithOptionalEnv).env?.VITE_DASHBOARD_DEBUG
+export const DEBUG_MODE = envDebugMode?.toLowerCase() === "true"
 /**
  * REST endpoint path for battery telemetry data.
  */
@@ -57,6 +61,10 @@ export const VIDEO_WHEP_STREAM_ANNOT = "gordon-annot"
  * WebSocket endpoint path for sending drive control commands.
  */
 export const CONTROL_WS_PATH = "/ws/control"
+/**
+ * WebSocket endpoint path for BNO055 orientation stream.
+ */
+export const ORIENTATION_WS_PATH = "/ws/orientation"
 
 // Drive loop tuning
 /**

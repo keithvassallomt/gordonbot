@@ -31,6 +31,7 @@ from glob import glob
 from collections import deque
 from typing import Deque, Optional, Tuple
 
+from app.core.config import settings
 from app.services.drive_state import get_sign_left, get_sign_right
 
 log = logging.getLogger(__name__)
@@ -109,7 +110,8 @@ class Encoder:
         self._steps_per_rev = max(
             1, int(round(self._counts_per_rev_x4 * (self._decoding_factor / 4.0)))
         )
-        self._circum_mm = float(math.pi * max(0.0, wheel_diameter_m) * 1000.0)
+        effective_diameter_m = max(0.0, wheel_diameter_m) + (settings.track_thickness_m * 2.0)
+        self._circum_mm = float(math.pi * effective_diameter_m * 1000.0)
         self._mm_per_step_base = self._circum_mm / float(self._steps_per_rev)
         # Which side this encoder is on ("left" or "right")
         self._side = "left" if str(side).lower().startswith("l") else "right"
