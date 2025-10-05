@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import audioop
 import logging
 import os
 import tempfile
@@ -103,6 +104,29 @@ def _record_relay_message() -> bytes:
         return b""
 
 
+def _apply_gain(audio_bytes: bytes, gain: float) -> bytes:
+    if not audio_bytes:
+        return audio_bytes
+
+    try:
+        gain = float(gain)
+    except (TypeError, ValueError):
+        return audio_bytes
+
+    if abs(gain - 1.0) < 1e-3:
+        return audio_bytes
+
+    gain = max(0.1, min(gain, 4.0))
+
+    try:
+        boosted = audioop.mul(audio_bytes, 2, gain)
+    except Exception as exc:
+        log.warning("Failed to apply intercom gain %.2f: %s", gain, exc)
+        return audio_bytes
+
+    return boosted
+
+
 @contextmanager
 def _temporarily_pause_wakeword():
     service = None
@@ -135,6 +159,8 @@ def _temporarily_pause_wakeword():
 def _play_audio_recording(audio_bytes: bytes) -> bool:
     if not audio_bytes:
         return False
+
+    audio_bytes = _apply_gain(audio_bytes, getattr(settings, "intercom_volume_gain", 1.0))
 
     try:
         fd, temp_path = tempfile.mkstemp(suffix=".wav", prefix="intercom-")

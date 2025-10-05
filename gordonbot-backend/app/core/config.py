@@ -132,6 +132,8 @@ class Settings(BaseModel):
         wakeword_audio_command,
     )
 
+    intercom_volume_gain: float = float(os.getenv("INTERCOM_VOLUME_GAIN", "1.8"))
+
     # Speech capture / ASR
     speech_vad_aggressiveness: int = max(0, min(3, int(os.getenv("SPEECH_VAD_AGGRESSIVENESS", "2"))))
     speech_vad_silence_ms: int = max(100, int(os.getenv("SPEECH_VAD_SILENCE_MS", "700")))
