@@ -122,3 +122,25 @@ class WakeWordStatus(BaseModel):
     detections: int = 0
     last_detected_at: Optional[datetime] = None
     recent: List[datetime] = Field(default_factory=list)
+
+
+# ---- LIDAR ------------------------------------------------------------------
+
+class LidarPointData(BaseModel):
+    angle: float = Field(description="Angle in degrees (0-360)")
+    distance_mm: float = Field(description="Distance in millimeters")
+    quality: int = Field(ge=0, le=255, description="Signal quality (0-255)")
+
+
+class LidarScanData(BaseModel):
+    ts: int = Field(description="Timestamp in milliseconds")
+    points: List[LidarPointData] = Field(description="List of scan points")
+    scan_rate_hz: float = Field(description="Scan rate in Hz")
+
+
+class LidarStatus(BaseModel):
+    connected: bool
+    running: bool
+    scan_rate_hz: float
+    port: str
+    health: str

@@ -203,5 +203,11 @@ class Settings(BaseModel):
         str(BACKEND_ROOT / "assets" / "calibration" / "bno055_offsets.json"),
     )
 
+    # LIDAR (RPLIDAR C1)
+    lidar_enabled: bool = _getenv_bool("LIDAR_ENABLED", False)
+    lidar_serial_port: str = os.getenv("LIDAR_SERIAL_PORT", "/dev/ttyUSB0")
+    lidar_baudrate: int = int(os.getenv("LIDAR_BAUDRATE", "460800"))
+    lidar_timeout: float = float(os.getenv("LIDAR_TIMEOUT", "0.2"))
+
 # Simple settings instance (expand later for env vars)
 settings = Settings()

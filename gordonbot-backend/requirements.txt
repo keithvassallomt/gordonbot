@@ -108,6 +108,7 @@ PyQt5-sip==12.11.1
 pyrsistent==0.18.1
 pyserial==3.5
 pysmbc==1.0.23
+rplidarc1==0.1.2
 python-apt==2.6.0
 python-dotenv==1.0.1
 python-prctl==1.8.1

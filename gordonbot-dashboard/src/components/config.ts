@@ -65,6 +65,10 @@ export const CONTROL_WS_PATH = "/ws/control"
  * WebSocket endpoint path for BNO055 orientation stream.
  */
 export const ORIENTATION_WS_PATH = "/ws/orientation"
+/**
+ * WebSocket endpoint path for LIDAR scan stream.
+ */
+export const LIDAR_WS_PATH = "/ws/lidar"
 
 // Drive loop tuning
 /**

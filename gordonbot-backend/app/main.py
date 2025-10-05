@@ -15,12 +15,15 @@ from app.routers import video as video_router
 from app.routers import sensors as sensors_router
 from app.routers import wakeword as wakeword_router
 from app.routers import orientation as orientation_router
+from app.routers import lidar as lidar_router
 from app.sockets import control as control_socket
 from app.sockets import orientation as orientation_socket
+from app.sockets import lidar as lidar_socket
 from app.services.camera import camera
 from app.services.audio_playback import AudioCuePlayer
 from app.services.wake_word import WakeWordService
 from app.services.voice_interaction import VoiceInteractionController
+from app.services.lidar import LidarService, set_lidar_service
 
 log = logging.getLogger(__name__)
 
@@ -70,6 +73,8 @@ def _setup_logging() -> None:
                 "propagate": False,
                 "filters": ["downgrade_uvicorn_access"],
             },
+            # Suppress noisy rplidarc1 protocol errors (library has parsing issues)
+            "rplidarc1.protocol": {"handlers": ["console"], "level": "CRITICAL", "propagate": False},
         },
         "root": {"handlers": ["console"], "level": "DEBUG" if settings.verbose else "INFO"},
     }
@@ -87,10 +92,12 @@ app = FastAPI(title="GordonBot Backend", version="0.1.0")
 wake_word_service: WakeWordService | None = None
 wake_audio_player: AudioCuePlayer | None = None
 voice_controller: VoiceInteractionController | None = None
+lidar_service: LidarService | None = None
 app.state.wake_word_service = None  # type: ignore[attr-defined]
 app.state.wake_audio_player = None  # type: ignore[attr-defined]
 app.state.voice_controller = None  # type: ignore[attr-defined]
 app.state.raw_stream_active = False  # type: ignore[attr-defined]
+app.state.lidar_service = None  # type: ignore[attr-defined]
 
 # CORS setup. Prefer regex if provided; otherwise use explicit list.
 cors_kwargs = dict(
@@ -116,12 +123,14 @@ api.include_router(video_router.router, prefix="")
 api.include_router(sensors_router.router, prefix="")
 api.include_router(wakeword_router.router, prefix="")
 api.include_router(orientation_router.router, prefix="")
+api.include_router(lidar_router.router, prefix="")
 
 app.mount(settings.api_prefix, api)
 
 # WebSocket (mounted on the root app, not under /api)
 app.include_router(control_socket.router)
 app.include_router(orientation_socket.router)
+app.include_router(lidar_socket.router)
 
 # (Optional for deployment) Serve built frontend from ./dist
 # app.mount("/", StaticFiles(directory="dist", html=True), name="static")
@@ -136,7 +145,7 @@ def _on_wake_word_detected(ts: datetime) -> None:
 
 @app.on_event("startup")
 async def _start_streaming_if_configured() -> None:
-    global wake_word_service, wake_audio_player, voice_controller
+    global wake_word_service, wake_audio_player, voice_controller, lidar_service
 
     # Optional annotated stream publisher (OpenCV overlays)
     if settings.camera_rtsp_annot_url:
@@ -201,10 +210,41 @@ async def _start_streaming_if_configured() -> None:
     else:
         app.state.wake_word_service = None  # type: ignore[attr-defined]
 
+    # LIDAR initialization
+    if settings.lidar_enabled:
+        try:
+            lidar_service = LidarService(
+                port=settings.lidar_serial_port,
+                baudrate=settings.lidar_baudrate,
+                timeout=settings.lidar_timeout,
+            )
+            app.state.lidar_service = lidar_service  # type: ignore[attr-defined]
+            set_lidar_service(lidar_service)
+
+            # Connect to LIDAR
+            connected = await lidar_service.connect()
+            if connected:
+                log.info("LIDAR connected successfully")
+                # Start scanning
+                started = await lidar_service.start_scan()
+                if started:
+                    log.info("LIDAR scanning started")
+                else:
+                    log.warning("Failed to start LIDAR scanning")
+            else:
+                log.warning("Failed to connect to LIDAR")
+        except Exception as exc:
+            log.error("Failed to initialize LIDAR service: %s", exc)
+            lidar_service = None
+            app.state.lidar_service = None  # type: ignore[attr-defined]
+    else:
+        log.info("LIDAR disabled in config")
+        app.state.lidar_service = None  # type: ignore[attr-defined]
+
 
 @app.on_event("shutdown")
 async def _stop_streaming() -> None:
-    global wake_word_service, wake_audio_player, voice_controller
+    global wake_word_service, wake_audio_player, voice_controller, lidar_service
     camera.stop_publisher()
     camera.stop_publisher_annotated()
     if wake_word_service is not None:
@@ -216,6 +256,13 @@ async def _stop_streaming() -> None:
     voice_controller = None
     app.state.voice_controller = None  # type: ignore[attr-defined]
     app.state.raw_stream_active = False  # type: ignore[attr-defined]
+
+    # Shutdown LIDAR
+    if lidar_service is not None:
+        await lidar_service.disconnect()
+        lidar_service = None
+    app.state.lidar_service = None  # type: ignore[attr-defined]
+    set_lidar_service(None)
 
 
 # Root-level WHEP proxy removed; use router-mounted endpoint under /api
