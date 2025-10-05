@@ -13,11 +13,8 @@ GordonBot is a Raspberry Pi-based robot with:
 
 ### Setup and Development
 ```bash
-# Bootstrap (one-time setup)
-bash scripts/bootstrap.sh
-
-# Run both backend and frontend with TUI supervisor
-bash scripts/dev.sh
+# Run Gordon monitor (supervises backend + frontend; optional MediaMTX)
+go run ./gordonmon
 
 # Backend only (port 8000)
 cd gordonbot-backend
@@ -148,7 +145,7 @@ Frontend config is in [gordonbot-dashboard/.env](gordonbot-dashboard/.env): `VIT
 - **No tests**: No test suite is present; test manually via dashboard and API endpoints
 - **Logging**: Set `VERBOSE=true` for detailed logs; default is concise
 - **GPIO dev mode**: On non-Pi systems, motor control logs commands without actuating hardware
-- **MediaMTX**: Must run separately or via `scripts/dev.sh` (optional auto-start)
+- **MediaMTX**: Start separately or let Gordonmon (`go run ./gordonmon`) handle it
 - **Ports**: Backend `:8000`, Frontend `:5173`, MediaMTX HTTP `:8889`, MediaMTX RTSP `:8554`
 
 ## Reference

@@ -46,11 +46,16 @@ gordonbot-dashboard/
   package.json, vite.config.ts, tsconfig*.json
   .env                    # Frontend runtime config (gitignored)
 
-scripts/
-  dev.sh                  # TUI supervisor to run backend + frontend, optional MediaMTX
-  bootstrap.sh            # Create venv, install deps for backend & dashboard
+gordonmon/
+  main.go                 # Go TUI supervisor for backend + frontend, optional MediaMTX
+  README.md               # Gordon monitor usage notes
+  state.json              # Persisted monitor settings (log level, etc.)
 
-codex.yaml                # Dev tasks (setup, dev, backend/frontend helpers)
+scripts/
+  project_index.py        # Generate Codex project index
+  power_monitor.sh, run_power_monitor.sh, throttlecheck.sh
+
+codex.yaml                # Dev tasks (monitor run, backend/frontend helpers)
 docs/ARCHITECTURE.md      # This file
 .codex/scan.json          # Machine‑readable index (generated)
 ```
@@ -62,7 +67,7 @@ docs/ARCHITECTURE.md      # This file
 - MediaMTX HTTP (WHEP): `:8889` (default)
 - MediaMTX RTSP: `:8554` (default)
 
-`scripts/dev.sh` supervises backend + frontend with a simple terminal UI. It can optionally start MediaMTX if present; otherwise it just connects to whatever you already run.
+Run `go run ./gordonmon` to supervise backend + frontend with a Bubble Tea TUI. It can optionally start MediaMTX if present; otherwise it just connects to whatever you already run.
 
 ## Backend Composition
 
@@ -176,16 +181,10 @@ Defined in `gordonbot-backend/app/core/config.py` and `gordonbot-backend/.env`.
 
 ## Dev, Build, and Run
 
-Bootstrap once:
+Gordon monitor (supervisor):
 
 ```bash
-bash scripts/bootstrap.sh
-```
-
-Run both (TUI supervisor):
-
-```bash
-bash scripts/dev.sh
+go run ./gordonmon
 ```
 
 Individual services:

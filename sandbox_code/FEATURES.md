@@ -445,42 +445,6 @@ go run .
 go build -o gordonmon && ./gordonmon
 ```
 
-### Supervisor: dev.sh (Bash TUI)
-
-#### Overview
-Alternative shell-based supervisor (simpler, no Go required).
-
-#### Files
-- `scripts/dev.sh` - Bash TUI script
-- `scripts/bootstrap.sh` - One-time setup (venv, deps)
-
-#### Features
-- Runs backend + frontend with simple log streaming
-- Interactive controls: R=reload, Q=quit
-- Port cleanup on exit
-- Optional MediaMTX startup
-
-#### Usage
-```bash
-bash scripts/dev.sh
-```
-
-### Bootstrap Script
-
-#### File
-- `scripts/bootstrap.sh`
-
-#### What It Does
-1. Creates Python venv for backend
-2. Installs backend dependencies (`requirements.txt`)
-3. Installs frontend dependencies (`npm ci`)
-4. Prints next steps
-
-#### Usage
-```bash
-bash scripts/bootstrap.sh
-```
-
 ---
 
 ## Feature Matrix

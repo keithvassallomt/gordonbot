@@ -3,7 +3,7 @@ GordonMon — Bubble Tea TUI Supervisor
 A terminal UI (Go) that supervises GordonBot services with a sticky header/footer and a mouse-scrollable log.
 
 Features
-- Starts/stops/restarts backend (FastAPI) and frontend (Vite) like scripts/dev.sh
+- Starts/stops/restarts backend (FastAPI) and frontend (Vite) via the Go supervisor
 - Optionally starts MediaMTX if not already running
 - Sticky header: status, first non-loopback IPv4, derived URLs, spinner while starting
 - Middle: scrollable log (mouse wheel, PgUp/PgDn, Home/End)

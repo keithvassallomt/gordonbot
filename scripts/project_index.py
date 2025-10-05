@@ -155,8 +155,7 @@ def main():
             }
         },
         "scripts": {
-            "bootstrap": "bash scripts/bootstrap.sh",
-            "dev": "bash scripts/dev.sh"
+            "run": "go run ./gordonmon"
         }
     }
 

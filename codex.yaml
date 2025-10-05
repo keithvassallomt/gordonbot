@@ -3,13 +3,9 @@ description: Developer tasks for GordonBot (backend FastAPI + Vite dashboard)
 
 # Common dev tasks you can run with Codex CLI or as reference commands
 tasks:
-  setup:
-    desc: Create backend venv and install backend/frontend deps
-    run: bash scripts/bootstrap.sh
-
-  dev:
-    desc: Run backend (Uvicorn) and frontend (Vite) with a TUI supervisor
-    run: bash scripts/dev.sh
+  monitor:run:
+    desc: Run Gordon monitor via Go entrypoint
+    run: go run ./gordonmon
 
   backend:dev:
     desc: Run FastAPI backend with auto-reload on port 8000

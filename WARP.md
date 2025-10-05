@@ -59,12 +59,12 @@ Where `VIDEO_WHEP_BASE` is `/api/video/whep/`.
 ### Full Stack Development
 ```bash
 # Start both backend and frontend with live reload and combined logs
-./scripts/dev.sh
+go run ./gordonmon
 
-# Development server provides:
+# GordonMon provides:
 # - Backend: FastAPI on :8000 with uvicorn auto-reload
 # - Frontend: Vite dev server on :5173 with HMR
-# - Interactive controls: (R)eload all, (X)terminate
+# - Interactive controls: (R)estart stack, (B)ackend only, (F)rontend only, (Q)uit
 ```
 
 ### Backend Only
@@ -142,5 +142,5 @@ python code/test_motors_encoders.py
 - **Python Dependencies**: FastAPI, uvicorn, pydantic (see `requirements.txt`)
 - **Node Requirements**: Node.js >=20.0.0 required for frontend
 - **Theme System**: Automatic dark/light mode detection with localStorage persistence
-- **Development Workflow**: Use `./scripts/dev.sh` for full-stack development with integrated log streaming
+- **Development Workflow**: Use `go run ./gordonmon` for full-stack development with integrated log streaming
 - **Safety Features**: Multiple layers including WebSocket disconnection handling, server-side value clamping, and dead-man timeout
