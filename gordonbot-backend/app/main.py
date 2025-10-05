@@ -3,29 +3,8 @@ import logging
 import logging.config
 from datetime import datetime
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-
+# Import settings FIRST so we can configure logging before anything else
 from app.core.config import settings
-from app.routers import ping as ping_router
-from app.routers import battery as battery_router
-from app.routers import diagnostics as diagnostics_router
-from app.routers import video as video_router
-from app.routers import sensors as sensors_router
-from app.routers import wakeword as wakeword_router
-from app.routers import orientation as orientation_router
-from app.routers import lidar as lidar_router
-from app.sockets import control as control_socket
-from app.sockets import orientation as orientation_socket
-from app.sockets import lidar as lidar_socket
-from app.services.camera import camera
-from app.services.audio_playback import AudioCuePlayer
-from app.services.wake_word import WakeWordService
-from app.services.voice_interaction import VoiceInteractionController
-from app.services.lidar import LidarService, set_lidar_service
-
-log = logging.getLogger(__name__)
 
 
 class AccessLogToDebugFilter(logging.Filter):
@@ -74,7 +53,12 @@ def _setup_logging() -> None:
                 "filters": ["downgrade_uvicorn_access"],
             },
             # Suppress noisy rplidarc1 protocol errors (library has parsing issues)
-            "rplidarc1.protocol": {"handlers": ["console"], "level": "CRITICAL", "propagate": False},
+            # Only show in verbose/debug mode
+            "rplidarc1.protocol": {
+                "handlers": ["console"],
+                "level": "DEBUG" if settings.verbose else "CRITICAL",
+                "propagate": False
+            },
         },
         "root": {"handlers": ["console"], "level": "DEBUG" if settings.verbose else "INFO"},
     }
@@ -84,8 +68,38 @@ def _setup_logging() -> None:
         # Last resort fallback
         logging.basicConfig(level=logging.DEBUG if settings.verbose else logging.INFO, format=fmt)
 
+    # Extra safeguard: explicitly set rplidarc1.protocol logger level
+    # This ensures it's silenced even if the library configures it after dictConfig
+    rplidar_logger = logging.getLogger("rplidarc1.protocol")
+    rplidar_logger.setLevel(logging.DEBUG if settings.verbose else logging.CRITICAL)
 
+
+# Setup logging BEFORE importing any application modules that might use loggers
 _setup_logging()
+
+# Now import everything else
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+
+from app.routers import ping as ping_router
+from app.routers import battery as battery_router
+from app.routers import diagnostics as diagnostics_router
+from app.routers import video as video_router
+from app.routers import sensors as sensors_router
+from app.routers import wakeword as wakeword_router
+from app.routers import orientation as orientation_router
+from app.routers import lidar as lidar_router
+from app.sockets import control as control_socket
+from app.sockets import orientation as orientation_socket
+from app.sockets import lidar as lidar_socket
+from app.services.camera import camera
+from app.services.audio_playback import AudioCuePlayer
+from app.services.wake_word import WakeWordService
+from app.services.voice_interaction import VoiceInteractionController
+from app.services.lidar import LidarService, set_lidar_service
+
+log = logging.getLogger(__name__)
 
 app = FastAPI(title="GordonBot Backend", version="0.1.0")
 

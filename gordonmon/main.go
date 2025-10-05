@@ -71,6 +71,66 @@ func savePersistedLogLevel(root, level string) {
 	_ = os.WriteFile(path, data, 0o644)
 }
 
+// updateEnvFile updates or adds a key=value pair in a .env file
+func updateEnvFile(envPath, key, value string) error {
+	// Read existing file
+	data, err := os.ReadFile(envPath)
+	if err != nil {
+		return err
+	}
+
+	lines := strings.Split(string(data), "\n")
+	found := false
+	keyPrefix := key + "="
+
+	// Update existing key or mark as found
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// Check for exact match or commented version
+		if strings.HasPrefix(trimmed, keyPrefix) {
+			// Replace this line with the new value
+			lines[i] = key + "=" + value
+			found = true
+			break
+		}
+		// Also match commented version like "# KEY=old" or "#KEY=old"
+		if strings.HasPrefix(trimmed, "#") {
+			uncommented := strings.TrimSpace(strings.TrimPrefix(trimmed, "#"))
+			if strings.HasPrefix(uncommented, keyPrefix) {
+				// Replace the commented line
+				lines[i] = key + "=" + value
+				found = true
+				break
+			}
+		}
+	}
+
+	// If key not found, append it
+	if !found {
+		lines = append(lines, key+"="+value)
+	}
+
+	// Write back
+	output := strings.Join(lines, "\n")
+	return os.WriteFile(envPath, []byte(output), 0o644)
+}
+
+// setBackendVerbose updates the VERBOSE setting in backend .env
+func setBackendVerbose(backendDir string, verbose bool) error {
+	envPath := filepath.Join(backendDir, ".env")
+	value := "false"
+	if verbose {
+		value = "true"
+	}
+	return updateEnvFile(envPath, "VERBOSE", value)
+}
+
+// setFrontendLogLevel updates the VITE_LOG_LEVEL setting in frontend .env
+func setFrontendLogLevel(frontendDir, level string) error {
+	envPath := filepath.Join(frontendDir, ".env")
+	return updateEnvFile(envPath, "VITE_LOG_LEVEL", level)
+}
+
 func getenv(key, def string) string {
 	v := os.Getenv(key)
 	if v == "" {
@@ -433,8 +493,13 @@ func initialModel(c cfg, pagerMode bool) model {
 	sp.Style = faintStyle
 	vp := viewport.New(80, 20)
 	vp.MouseWheelEnabled = true
+
+	// Initialize levelThreshold from the persisted/configured backend log level
+	initialThreshold := levelValue(c.backendLogLevel)
+	initialModalIndex := levelIndexFromThreshold(initialThreshold)
+
 	// pagerMode=true means: do NOT auto-follow logs (act like a pager)
-	return model{cfg: c, vp: vp, spinner: sp, logs: make([]string, 0, 200), maxLines: 5000, status: "starting", ip: firstNonLoopbackIPv4(), starting: true, tailFollow: !pagerMode, mouseEnabled: true, levelThreshold: 20, showLevelModal: false, modalIndex: 1}
+	return model{cfg: c, vp: vp, spinner: sp, logs: make([]string, 0, 200), maxLines: 5000, status: "starting", ip: firstNonLoopbackIPv4(), starting: true, tailFollow: !pagerMode, mouseEnabled: true, levelThreshold: initialThreshold, showLevelModal: false, modalIndex: initialModalIndex}
 }
 
 func (m model) Init() tea.Cmd {
@@ -754,6 +819,13 @@ func headerLines(m model) string {
 	}
 	state := formatBattState(m.battState)
 
+	// Current log level
+	currentLevel := levelNameFromThreshold(m.levelThreshold)
+	levelStyle := faintStyle
+	if m.levelThreshold <= 10 {
+		levelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("117")) // DEBUG in blue
+	}
+
 	headerLines := []string{
 		titleStyle.Render("🤖 GordonBot Dev Server"),
 		status,
@@ -761,7 +833,7 @@ func headerLines(m model) string {
 		ws,
 		mtx,
 		fe,
-		fmt.Sprintf("🌡 CPU: %s   🔋 Battery: %s %s", cpu, bp, state),
+		fmt.Sprintf("🌡 CPU: %s   🔋 Battery: %s %s   🪵 Log Level: %s", cpu, bp, state, levelStyle.Render(currentLevel)),
 	}
 	return strings.Join(headerLines, "\n")
 }
@@ -906,52 +978,91 @@ func (m *model) applySelectedLevel() tea.Cmd {
 	m.levelThreshold = selectedValue
 	logLevel := logLevelForName(selectedName)
 	wantAccess := selectedValue <= 10
+	wantVerbose := selectedValue <= 10 // DEBUG = verbose mode
 
-	restartNeeded := false
+	restartBackend := false
+	restartFrontend := false
+
 	if wantAccess != prevAccess {
-		restartNeeded = true
+		restartBackend = true
 		m.cfg.backendAccessLog = wantAccess
 	}
 	if logLevel != prevLogLevel {
-		restartNeeded = true
+		restartBackend = true
 		m.cfg.backendLogLevel = logLevel
 	}
 
 	m.showLevelModal = false
-	if !restartNeeded {
+
+	// If only the filter threshold changed (no backend changes), just update the view
+	if !restartBackend && !restartFrontend {
 		if prevThreshold != selectedValue {
 			m.updateContent()
 		}
 		return nil
 	}
-	if logLevel != prevLogLevel {
-		savePersistedLogLevel(m.cfg.root, logLevel)
-		m.appendLog(fmt.Sprintf("%s Backend log level set to %s", tagStart, strings.ToUpper(logLevel)))
-	}
-	if wantAccess != prevAccess {
-		if wantAccess {
-			m.appendLog(fmt.Sprintf("%s Backend access log enabled", tagStart))
+
+	// Update .env files
+	if restartBackend {
+		// Update backend .env with VERBOSE setting
+		if err := setBackendVerbose(m.cfg.backendDir, wantVerbose); err != nil {
+			m.appendLog(fmt.Sprintf("%s Error updating backend .env: %v", tagStart, err))
 		} else {
-			m.appendLog(fmt.Sprintf("%s Backend access log disabled", tagStart))
+			savePersistedLogLevel(m.cfg.root, logLevel)
+			m.appendLog(fmt.Sprintf("%s Backend log level set to %s (VERBOSE=%v)", tagStart, strings.ToUpper(logLevel), wantVerbose))
+		}
+
+		if wantAccess != prevAccess {
+			if wantAccess {
+				m.appendLog(fmt.Sprintf("%s Backend access log enabled", tagStart))
+			} else {
+				m.appendLog(fmt.Sprintf("%s Backend access log disabled", tagStart))
+			}
 		}
 	}
+
+	// Always update frontend .env to keep levels in sync
+	if err := setFrontendLogLevel(m.cfg.frontendDir, strings.ToUpper(selectedName)); err != nil {
+		m.appendLog(fmt.Sprintf("%s Error updating frontend .env: %v", tagStart, err))
+	} else {
+		m.appendLog(fmt.Sprintf("%s Frontend log level set to %s", tagStart, strings.ToUpper(selectedName)))
+		restartFrontend = true
+	}
+
 	m.status = "restarting"
 	m.starting = true
 	m.updateContent()
-	return restartBackendCmd(m.cfg)
+
+	// Restart services
+	if restartBackend && restartFrontend {
+		return reloadCmd(m.cfg) // Restart both
+	} else if restartBackend {
+		return restartBackendCmd(m.cfg)
+	} else if restartFrontend {
+		return restartFrontendCmd(m.cfg)
+	}
+
+	return nil
 }
 
 func (m model) levelModalView() string {
 	names := levelNames()
 	var b strings.Builder
+	currentLevel := levelNameFromThreshold(m.levelThreshold)
 	fmt.Fprintf(&b, "%s\n", titleStyle.Render("Filter Logs by Level"))
+	fmt.Fprintf(&b, "%s\n", faintStyle.Render(fmt.Sprintf("Current: %s", currentLevel)))
 	fmt.Fprintf(&b, "%s\n\n", faintStyle.Render("Use ↑/↓ or 1..5, Enter to apply, Esc to cancel"))
 	for i, name := range names {
 		cursor := "  "
 		if i == m.modalIndex {
 			cursor = "> "
 		}
-		line := fmt.Sprintf("%s%d. %s", cursor, i+1, name)
+		// Mark the currently applied level
+		indicator := ""
+		if name == currentLevel {
+			indicator = " ✓"
+		}
+		line := fmt.Sprintf("%s%d. %s%s", cursor, i+1, name, indicator)
 		if i == m.modalIndex {
 			line = lipgloss.NewStyle().Bold(true).Render(line)
 		}
