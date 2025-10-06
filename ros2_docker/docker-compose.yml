@@ -1,0 +1,39 @@
+services:
+  ros2_slam:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: gordonbot-ros2-slam:latest
+    container_name: gordonbot-ros2-slam
+    network_mode: "host"  # Share network with host for low-latency DDS communication
+    volumes:
+      # Mount config files
+      - ./config:/config:ro
+      # Mount maps directory for persistence
+      - ./maps:/maps
+      # Share /dev for potential hardware access (if needed)
+      - /dev:/dev
+    environment:
+      - ROS_DOMAIN_ID=0
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - CYCLONEDDS_URI=file:///config/cyclonedds.xml
+    privileged: false  # Set to true if hardware access needed
+    restart: unless-stopped
+    command: >
+      bash -c "
+      source /ros2_ws/install/setup.bash &&
+      ros2 launch /config/slam_launch.py
+      "
+
+  # Optional: RViz for visualization (comment out on headless systems)
+  # rviz:
+  #   image: osrf/ros:humble-desktop
+  #   container_name: gordonbot-rviz
+  #   network_mode: "host"
+  #   environment:
+  #     - DISPLAY=${DISPLAY}
+  #     - ROS_DOMAIN_ID=0
+  #   volumes:
+  #     - /tmp/.X11-unix:/tmp/.X11-unix:rw
+  #     - ./config/rviz_config.rviz:/config/slam.rviz:ro
+  #   command: ros2 run rviz2 rviz2 -d /config/slam.rviz

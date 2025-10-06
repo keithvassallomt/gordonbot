@@ -37,3 +37,9 @@ __pycache__/
 # Local recordings and logs
 assets/recording/*
 *.log
+
+# SLAM planning document (local working file)
+slam_plan.md
+
+# lgpio daemon named pipes
+.lgd-nfy*

@@ -438,6 +438,12 @@ func stopAll() {
 	for _, p := range m {
 		stopProcess(p)
 	}
+	// Stop ROS2 SLAM Docker container
+	c := loadCfg()
+	ros2DockerDir := filepath.Join(c.root, "ros2_docker")
+	if _, err := os.Stat(ros2DockerDir); err == nil {
+		exec.Command("bash", "-c", "cd "+ros2DockerDir+" && sudo docker compose down").Run()
+	}
 }
 
 // ---------- UI Model ----------
@@ -527,6 +533,24 @@ func startAllCmd(c cfg) tea.Cmd {
 		killPort(c.backendPort)
 		program.Send(logMsg{fmt.Sprintf("%s Killing existing processes on frontend port %d", tagStart, c.frontendPort)})
 		killPort(c.frontendPort)
+
+		// ROS2 SLAM Docker
+		ros2DockerDir := filepath.Join(c.root, "ros2_docker")
+		if _, err := os.Stat(ros2DockerDir); err == nil {
+			program.Send(logMsg{fmt.Sprintf("%s Starting ROS2 SLAM container…", tagStart)})
+			slamCmd := exec.Command("bash", "-c", "cd "+ros2DockerDir+" && sudo docker compose up -d")
+			if output, slamErr := slamCmd.CombinedOutput(); slamErr != nil {
+				program.Send(logMsg{fmt.Sprintf("%s ROS2 SLAM failed to start: %v: %s", tagStart, slamErr, string(output))})
+			} else {
+				// Log the output from docker compose
+				for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+					if line != "" {
+						program.Send(logMsg{fmt.Sprintf("[ros2_slam] %s", line)})
+					}
+				}
+				program.Send(logMsg{fmt.Sprintf("%s ROS2 SLAM container started", tagStart)})
+			}
+		}
 
 		// MediaMTX
 		if !mediamtxRunning(c.whepHTTPPort, c.mediamtxCmd) && c.mediamtxCmd != "" {
