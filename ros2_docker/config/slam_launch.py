@@ -13,7 +13,9 @@ import os
 
 def generate_launch_description():
     # Get backend URL from environment or use default
-    backend_url = os.environ.get('BACKEND_URL', 'http://host.docker.internal:8000')
+    # Since we use network_mode: host in docker-compose, localhost works
+    backend_http_url = os.environ.get('BACKEND_URL', 'http://localhost:8000')
+    backend_ws_url = os.environ.get('BACKEND_WS_URL', 'ws://localhost:8000')
 
     # Parameters
     use_sim_time = LaunchConfiguration('use_sim_time', default='false')
@@ -34,7 +36,7 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'use_sim_time': use_sim_time,
-                'backend_url': backend_url,
+                'backend_url': backend_ws_url,
                 'frame_id': 'laser'
             }]
         ),
@@ -47,7 +49,7 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'use_sim_time': use_sim_time,
-                'backend_url': backend_url,
+                'backend_url': backend_http_url,
                 'poll_rate_hz': 20.0,
                 'wheel_base_m': 0.14,
                 'odom_frame': 'odom',
@@ -63,7 +65,7 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'use_sim_time': use_sim_time,
-                'backend_url': backend_url,
+                'backend_url': backend_http_url,
                 'poll_rate_hz': 50.0,
                 'frame_id': 'imu_link',
                 'base_frame': 'base_link'

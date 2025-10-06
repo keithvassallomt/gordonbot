@@ -138,6 +138,36 @@ class LidarScanData(BaseModel):
     scan_rate_hz: float = Field(description="Scan rate in Hz")
 
 
+# ---- SLAM -------------------------------------------------------------------
+
+class SlamMapOrigin(BaseModel):
+    """Map origin position and orientation."""
+    x: float = Field(description="X position in meters")
+    y: float = Field(description="Y position in meters")
+    theta: float = Field(description="Rotation in radians")
+
+
+class SlamMapMessage(BaseModel):
+    """SLAM map data (occupancy grid)."""
+    type: str = Field(default="map", description="Message type")
+    ts: int = Field(description="Timestamp in milliseconds")
+    width: int = Field(description="Map width in cells")
+    height: int = Field(description="Map height in cells")
+    resolution: float = Field(description="Meters per cell")
+    origin: SlamMapOrigin = Field(description="Map origin (lower-left corner)")
+    data: List[int] = Field(description="Occupancy grid data: -1=unknown, 0=free, 100=occupied")
+
+
+class SlamPoseMessage(BaseModel):
+    """Robot pose in map frame."""
+    type: str = Field(default="pose", description="Message type")
+    ts: int = Field(description="Timestamp in milliseconds")
+    x: float = Field(description="X position in meters")
+    y: float = Field(description="Y position in meters")
+    theta: float = Field(description="Orientation in radians")
+    frame_id: str = Field(default="map", description="Reference frame")
+
+
 class LidarStatus(BaseModel):
     connected: bool
     running: bool

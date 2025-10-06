@@ -12,3 +12,9 @@ router = APIRouter()
 def sensors_status() -> SensorsStatus:
     return get_sensor_status()
 
+
+@router.get("/sensors", response_model=SensorsStatus, tags=["sensors"])
+def sensors() -> SensorsStatus:
+    """Alias for /sensors/status for ROS2 bridge compatibility."""
+    return get_sensor_status()
+

@@ -50,7 +50,7 @@ class MapBridge(Node):
         self.pose_lock = threading.Lock()
 
         # Connected WebSocket clients
-        self.clients = set()
+        self._clients = set()
 
         self.get_logger().info(f'Map bridge starting WebSocket server on port {self.ws_port}')
 
@@ -102,36 +102,36 @@ class MapBridge(Node):
 
     async def _broadcast_map(self):
         """Broadcast latest map to all clients."""
-        if not self.clients or not self.latest_map:
+        if not self._clients or not self.latest_map:
             return
 
         message = json.dumps(self.latest_map)
         disconnected = set()
 
-        for client in self.clients:
+        for client in self._clients:
             try:
                 await client.send(message)
             except:
                 disconnected.add(client)
 
         # Remove disconnected clients
-        self.clients -= disconnected
+        self._clients -= disconnected
 
     async def _broadcast_pose(self):
         """Broadcast latest pose to all clients."""
-        if not self.clients or not self.latest_pose:
+        if not self._clients or not self.latest_pose:
             return
 
         message = json.dumps(self.latest_pose)
         disconnected = set()
 
-        for client in self.clients:
+        for client in self._clients:
             try:
                 await client.send(message)
             except:
                 disconnected.add(client)
 
-        self.clients -= disconnected
+        self._clients -= disconnected
 
     def _run_websocket_server(self):
         """Run WebSocket server."""
@@ -139,8 +139,8 @@ class MapBridge(Node):
         asyncio.set_event_loop(loop)
 
         async def handler(websocket):
-            self.clients.add(websocket)
-            self.get_logger().info(f'Client connected, total clients: {len(self.clients)}')
+            self._clients.add(websocket)
+            self.get_logger().info(f'Client connected, total clients: {len(self._clients)}')
 
             try:
                 # Send latest data immediately on connect
@@ -164,8 +164,8 @@ class MapBridge(Node):
             except websockets.exceptions.ConnectionClosed:
                 pass
             finally:
-                self.clients.discard(websocket)
-                self.get_logger().info(f'Client disconnected, total clients: {len(self.clients)}')
+                self._clients.discard(websocket)
+                self.get_logger().info(f'Client disconnected, total clients: {len(self._clients)}')
 
         async def start_server():
             async with websockets.serve(handler, '0.0.0.0', self.ws_port):
