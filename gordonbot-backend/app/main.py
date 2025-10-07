@@ -100,6 +100,7 @@ from app.services.audio_playback import AudioCuePlayer
 from app.services.wake_word import WakeWordService
 from app.services.voice_interaction import VoiceInteractionController
 from app.services.lidar import LidarService, set_lidar_service
+from app.services.bno055 import start_bno055_poller, stop_bno055_poller
 
 log = logging.getLogger(__name__)
 
@@ -259,6 +260,13 @@ async def _start_streaming_if_configured() -> None:
         log.info("LIDAR disabled in config")
         app.state.lidar_service = None  # type: ignore[attr-defined]
 
+    # Start BNO055 polling service
+    try:
+        start_bno055_poller()
+        log.info("Started BNO055 poller")
+    except Exception as exc:
+        log.error("Failed to start BNO055 poller: %s", exc)
+
     # Start SLAM map_bridge connection
     try:
         slam_socket.start_map_bridge_connection()
@@ -288,6 +296,7 @@ async def _stop_streaming() -> None:
         lidar_service = None
     app.state.lidar_service = None  # type: ignore[attr-defined]
     set_lidar_service(None)
+    stop_bno055_poller()
 
 
 # Root-level WHEP proxy removed; use router-mounted endpoint under /api

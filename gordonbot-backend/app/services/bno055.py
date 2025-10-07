@@ -41,6 +41,14 @@ _LAST_INIT_ATTEMPT = 0.0
 _INIT_BACKOFF_SEC = 5.0
 _CALIBRATION_PATH = Path(settings.bno055_calibration_path)
 
+_DEFAULT_POLL_RATE_HZ = 50.0
+_READ_LOCK = threading.Lock()
+_CACHE_LOCK = threading.Lock()
+_latest_data: Optional[BNO055Data] = None
+_latest_orientation: Optional["OrientationSample"] = None
+_latest_timestamp: float = 0.0
+_poller: Optional["_BNO055Poller"] = None
+
 
 def _ensure_sensor() -> Optional["adafruit_bno055.BNO055_I2C"]:
     """Initialise the BNO055 instance lazily and return it when ready."""
@@ -80,6 +88,7 @@ def _reset_sensor() -> None:
     with _SENSOR_LOCK:
         _SENSOR = None
         _LAST_INIT_ATTEMPT = 0.0
+    _clear_cache()
 
 
 def _apply_saved_offsets(sensor: "adafruit_bno055.BNO055_I2C") -> None:  # type: ignore[name-defined]
@@ -98,16 +107,17 @@ def _apply_saved_offsets(sensor: "adafruit_bno055.BNO055_I2C") -> None:  # type:
             accel_radius = data.get("radius_accelerometer")
             mag_radius = data.get("radius_magnetometer")
 
-            if accel_offsets is not None:
-                sensor.offsets_accelerometer = tuple(accel_offsets)  # type: ignore[attr-defined]
-            if mag_offsets is not None:
-                sensor.offsets_magnetometer = tuple(mag_offsets)  # type: ignore[attr-defined]
-            if gyro_offsets is not None:
-                sensor.offsets_gyroscope = tuple(gyro_offsets)  # type: ignore[attr-defined]
-            if accel_radius is not None:
-                sensor.radius_accelerometer = int(accel_radius)  # type: ignore[attr-defined]
-            if mag_radius is not None:
-                sensor.radius_magnetometer = int(mag_radius)  # type: ignore[attr-defined]
+            with _READ_LOCK:
+                if accel_offsets is not None:
+                    sensor.offsets_accelerometer = tuple(accel_offsets)  # type: ignore[attr-defined]
+                if mag_offsets is not None:
+                    sensor.offsets_magnetometer = tuple(mag_offsets)  # type: ignore[attr-defined]
+                if gyro_offsets is not None:
+                    sensor.offsets_gyroscope = tuple(gyro_offsets)  # type: ignore[attr-defined]
+                if accel_radius is not None:
+                    sensor.radius_accelerometer = int(accel_radius)  # type: ignore[attr-defined]
+                if mag_radius is not None:
+                    sensor.radius_magnetometer = int(mag_radius)  # type: ignore[attr-defined]
 
             log.info("Applied saved BNO055 calibration offsets from %s", path)
         else:
@@ -195,31 +205,36 @@ def _sanitize_euler(euler: Optional[EulerDeg]) -> tuple[Optional[EulerDeg], bool
     return sanitized, stale
 
 
-def read_bno055() -> Optional[BNO055Data]:
-    """Read all available BNO055 channels and return them as a schema object."""
-
+def _read_sensor_snapshot() -> tuple[Optional[BNO055Data], Optional["OrientationSample"]]:
     sensor = _ensure_sensor()
     if sensor is None:
-        return None
+        return None, None
 
     try:
-        euler = sensor.euler
-        quat = sensor.quaternion
-        ang_vel = sensor.gyro  # radians/sec
-        accel = sensor.acceleration  # m/s^2
-        mag = sensor.magnetic  # microTesla
-        lin_accel = sensor.linear_acceleration  # m/s^2 without gravity
-        gravity = sensor.gravity  # m/s^2 gravity vector
-        temp_c = sensor.temperature
-        calib = getattr(sensor, "calibration_status", None)
+        with _READ_LOCK:
+            euler = sensor.euler
+            quat = sensor.quaternion
+            ang_vel = sensor.gyro
+            accel = sensor.acceleration
+            mag = sensor.magnetic
+            lin_accel = sensor.linear_acceleration
+            gravity = sensor.gravity
+            temp_c = sensor.temperature
+            calib = getattr(sensor, "calibration_status", None)
     except Exception as exc:  # pragma: no cover - hardware path
         log.debug("BNO055 read error: %s", exc)
         _reset_sensor()
-        return None
+        return None, None
 
-    return BNO055Data(
-        euler=_euler(euler),
-        quat=_quat(quat),
+    base_euler = _euler(euler)
+    base_quat = _quat(quat)
+
+    quat_model, quat_stale = _sanitize_quaternion(base_quat)
+    euler_model, euler_stale = _sanitize_euler(base_euler)
+
+    data = BNO055Data(
+        euler=euler_model,
+        quat=quat_model,
         ang_vel_rad_s=_vec3(ang_vel),
         accel_m_s2=_vec3(accel),
         mag_uT=_vec3(mag),
@@ -228,6 +243,50 @@ def read_bno055() -> Optional[BNO055Data]:
         temp_c=float(temp_c) if temp_c is not None else None,
         calibration=_calibration(calib),
     )
+
+    orientation = OrientationSample(
+        quaternion=quat_model,
+        euler=euler_model,
+        calibration=data.calibration,
+        stale=quat_stale or euler_stale,
+    )
+
+    return data, orientation
+
+
+def _update_cache(data: Optional[BNO055Data], orientation: Optional["OrientationSample"]) -> None:
+    global _latest_data, _latest_orientation, _latest_timestamp
+    with _CACHE_LOCK:
+        if data is not None:
+            _latest_data = data
+        if orientation is not None:
+            _latest_orientation = orientation
+        _latest_timestamp = time.monotonic()
+
+
+def _clear_cache() -> None:
+    global _latest_data, _latest_orientation, _latest_timestamp
+    with _CACHE_LOCK:
+        _latest_data = None
+        _latest_orientation = None
+        _latest_timestamp = 0.0
+
+
+def read_bno055() -> Optional[BNO055Data]:
+    """Read all available BNO055 channels and return them as a schema object."""
+
+    with _CACHE_LOCK:
+        cached = _latest_data
+    if cached is not None:
+        return cached
+
+    data, orientation = _read_sensor_snapshot()
+    if data is None and orientation is None:
+        return None
+
+    _update_cache(data, orientation)
+    with _CACHE_LOCK:
+        return _latest_data
 
 
 @dataclass
@@ -239,31 +298,18 @@ class OrientationSample:
 
 
 def read_orientation_sample() -> Optional[OrientationSample]:
-    sensor = _ensure_sensor()
-    if sensor is None:
+    with _CACHE_LOCK:
+        cached = _latest_orientation
+    if cached is not None:
+        return cached
+
+    data, orientation = _read_sensor_snapshot()
+    if data is None and orientation is None:
         return None
 
-    try:
-        quat = sensor.quaternion
-        euler = sensor.euler
-        calib = getattr(sensor, "calibration_status", None)
-    except Exception as exc:  # pragma: no cover - hardware path
-        log.debug("BNO055 orientation read error: %s", exc)
-        _reset_sensor()
-        return None
-
-    if not quat:
-        return None
-
-    quat_model, quat_stale = _sanitize_quaternion(_quat(quat))
-    euler_model, euler_stale = _sanitize_euler(_euler(euler))
-
-    return OrientationSample(
-        quaternion=quat_model,
-        euler=euler_model,
-        calibration=_calibration(calib),
-        stale=quat_stale or euler_stale,
-    )
+    _update_cache(data, orientation)
+    with _CACHE_LOCK:
+        return _latest_orientation
 
 
 def start_bno055_calibration() -> bool:
@@ -275,20 +321,24 @@ def start_bno055_calibration() -> bool:
         config_mode = getattr(adafruit_bno055, "CONFIG_MODE", None)
         ndof_mode = getattr(adafruit_bno055, "NDOF_MODE", None)
 
-        if hasattr(sensor, "mode") and config_mode is not None:
-            sensor.mode = config_mode
-            time.sleep(0.1)
+        with _READ_LOCK:
+            if hasattr(sensor, "mode") and config_mode is not None:
+                sensor.mode = config_mode
+                time.sleep(0.1)
 
-        reset = getattr(sensor, "reset", None)
-        if callable(reset):
-            try:
-                reset()
-                time.sleep(0.5)
-            except Exception as exc:  # pragma: no cover - hardware path
-                log.debug("BNO055 reset during calibration start failed: %s", exc)
+            reset = getattr(sensor, "reset", None)
+            if callable(reset):
+                try:
+                    reset()
+                    time.sleep(0.5)
+                except Exception as exc:  # pragma: no cover - hardware path
+                    log.debug("BNO055 reset during calibration start failed: %s", exc)
 
-        if hasattr(sensor, "mode") and ndof_mode is not None:
-            sensor.mode = ndof_mode
+            if hasattr(sensor, "mode") and ndof_mode is not None:
+                sensor.mode = ndof_mode
+
+        # Clear cache so next read reflects fresh calibration
+        _clear_cache()
 
         return True
     except Exception as exc:  # pragma: no cover - hardware path
@@ -304,13 +354,14 @@ def save_bno055_offsets() -> bool:
         return False
 
     try:
-        # Read calibration offsets using individual properties
-        # These properties automatically switch to CONFIG_MODE
-        accel_offsets = sensor.offsets_accelerometer  # type: ignore[attr-defined]
-        mag_offsets = sensor.offsets_magnetometer  # type: ignore[attr-defined]
-        gyro_offsets = sensor.offsets_gyroscope  # type: ignore[attr-defined]
-        accel_radius = sensor.radius_accelerometer  # type: ignore[attr-defined]
-        mag_radius = sensor.radius_magnetometer  # type: ignore[attr-defined]
+        with _READ_LOCK:
+            # Read calibration offsets using individual properties
+            # These properties automatically switch to CONFIG_MODE
+            accel_offsets = sensor.offsets_accelerometer  # type: ignore[attr-defined]
+            mag_offsets = sensor.offsets_magnetometer  # type: ignore[attr-defined]
+            gyro_offsets = sensor.offsets_gyroscope  # type: ignore[attr-defined]
+            accel_radius = sensor.radius_accelerometer  # type: ignore[attr-defined]
+            mag_radius = sensor.radius_magnetometer  # type: ignore[attr-defined]
 
         payload = {
             "offsets_accelerometer": list(accel_offsets),
@@ -329,3 +380,54 @@ def save_bno055_offsets() -> bool:
     except Exception as exc:
         log.error("Failed to save BNO055 calibration offsets: %s", exc)
         return False
+
+
+class _BNO055Poller(threading.Thread):
+    def __init__(self, rate_hz: float) -> None:
+        super().__init__(daemon=True)
+        self._rate_hz = max(1.0, float(rate_hz))
+        self._stop_event = threading.Event()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+
+    def run(self) -> None:
+        interval = 1.0 / self._rate_hz
+        failure_count = 0
+        while not self._stop_event.is_set():
+            started = time.monotonic()
+            data, orientation = _read_sensor_snapshot()
+            if data is not None or orientation is not None:
+                _update_cache(data, orientation)
+                failure_count = 0
+            else:
+                failure_count += 1
+                if failure_count % int(self._rate_hz) == 0:
+                    log.debug("BNO055 poller still waiting for sensor data")
+            elapsed = time.monotonic() - started
+            wait = interval - elapsed
+            if wait < 0.0:
+                wait = interval
+            self._stop_event.wait(wait)
+
+
+def start_bno055_poller(rate_hz: float = _DEFAULT_POLL_RATE_HZ) -> None:
+    global _poller
+    if _poller is not None and _poller.is_alive():
+        return
+    poller = _BNO055Poller(rate_hz)
+    poller.start()
+    _poller = poller
+    log.info("Started BNO055 poller at %.1f Hz", rate_hz)
+
+
+def stop_bno055_poller(timeout: float = 1.0) -> None:
+    global _poller
+    poller = _poller
+    if poller is None:
+        return
+    poller.stop()
+    poller.join(timeout=timeout)
+    if poller.is_alive():
+        log.warning("BNO055 poller did not stop cleanly; continuing shutdown")
+    _poller = None
