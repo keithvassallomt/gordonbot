@@ -6,11 +6,14 @@ Map Bridge Node - Subscribes to /map from slam_toolbox and serves via WebSocket.
 import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import OccupancyGrid
-from geometry_msgs.msg import PoseStamped
+from tf2_ros import TransformException
+from tf2_ros.buffer import Buffer
+from tf2_ros.transform_listener import TransformListener
 import asyncio
 import websockets
 import json
 import threading
+import math
 from datetime import datetime
 
 
@@ -21,12 +24,20 @@ class MapBridge(Node):
         # Declare parameters
         self.declare_parameter('ws_port', 9001)
         self.declare_parameter('map_topic', '/map')
-        self.declare_parameter('pose_topic', '/pose')
+        self.declare_parameter('pose_rate_hz', 10.0)
+        self.declare_parameter('map_frame', 'map')
+        self.declare_parameter('base_frame', 'base_link')
 
         # Get parameters
         self.ws_port = self.get_parameter('ws_port').value
         map_topic = self.get_parameter('map_topic').value
-        pose_topic = self.get_parameter('pose_topic').value
+        self.pose_rate = self.get_parameter('pose_rate_hz').value
+        self.map_frame = self.get_parameter('map_frame').value
+        self.base_frame = self.get_parameter('base_frame').value
+
+        # TF2 buffer and listener for pose extraction
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
 
         # Subscribers
         self.map_sub = self.create_subscription(
@@ -36,11 +47,10 @@ class MapBridge(Node):
             10
         )
 
-        self.pose_sub = self.create_subscription(
-            PoseStamped,
-            pose_topic,
-            self._pose_callback,
-            10
+        # Timer for periodic pose updates
+        self.pose_timer = self.create_timer(
+            1.0 / self.pose_rate,
+            self._update_pose
         )
 
         # Latest data
@@ -53,6 +63,7 @@ class MapBridge(Node):
         self._ws_clients = set()
 
         self.get_logger().info(f'Map bridge starting WebSocket server on port {self.ws_port}')
+        self.get_logger().info(f'Publishing pose at {self.pose_rate}Hz from TF: {self.map_frame} -> {self.base_frame}')
 
         # Start WebSocket server in separate thread
         self.ws_thread = threading.Thread(target=self._run_websocket_server, daemon=True)
@@ -80,25 +91,45 @@ class MapBridge(Node):
         # Broadcast to all connected clients
         asyncio.run(self._broadcast_map())
 
-    def _pose_callback(self, msg):
-        """Callback for /pose topic."""
-        with self.pose_lock:
-            self.latest_pose = {
-                'type': 'pose',
-                'ts': int(datetime.now().timestamp() * 1000),
-                'x': msg.pose.position.x,
-                'y': msg.pose.position.y,
-                'z': msg.pose.position.z,
-                'orientation': {
-                    'x': msg.pose.orientation.x,
-                    'y': msg.pose.orientation.y,
-                    'z': msg.pose.orientation.z,
-                    'w': msg.pose.orientation.w
-                }
-            }
+    def _update_pose(self):
+        """Extract robot pose from TF transform (map -> base_link)."""
+        try:
+            # Look up the transform from map to base_link
+            transform = self.tf_buffer.lookup_transform(
+                self.map_frame,
+                self.base_frame,
+                rclpy.time.Time()  # Get latest available transform
+            )
 
-        # Broadcast to all connected clients
-        asyncio.run(self._broadcast_pose())
+            # Extract position
+            x = transform.transform.translation.x
+            y = transform.transform.translation.y
+
+            # Extract orientation (quaternion -> yaw)
+            quat = transform.transform.rotation
+            # Convert quaternion to yaw (theta)
+            # For 2D: yaw = atan2(2*(qw*qz + qx*qy), 1 - 2*(qy^2 + qz^2))
+            theta = math.atan2(
+                2.0 * (quat.w * quat.z + quat.x * quat.y),
+                1.0 - 2.0 * (quat.y * quat.y + quat.z * quat.z)
+            )
+
+            with self.pose_lock:
+                self.latest_pose = {
+                    'type': 'pose',
+                    'ts': int(datetime.now().timestamp() * 1000),
+                    'x': x,
+                    'y': y,
+                    'theta': theta,
+                    'frame_id': self.map_frame
+                }
+
+            # Broadcast to all connected clients
+            asyncio.run(self._broadcast_pose())
+
+        except TransformException as ex:
+            # Transform not available yet (expected at startup)
+            pass
 
     async def _broadcast_map(self):
         """Broadcast latest map to all clients."""

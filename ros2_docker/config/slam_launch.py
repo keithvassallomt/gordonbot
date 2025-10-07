@@ -102,7 +102,9 @@ def generate_launch_description():
                 'use_sim_time': use_sim_time,
                 'ws_port': 9001,
                 'map_topic': '/map',
-                'pose_topic': '/pose'
+                'pose_rate_hz': 10.0,
+                'map_frame': 'map',
+                'base_frame': 'base_link'
             }]
         ),
     ])
