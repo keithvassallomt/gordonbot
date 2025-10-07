@@ -81,13 +81,27 @@ export const DEADMAN_MS = 300
  */
 export const COMMAND_HZ = 20
 /**
- * Maximum normalized speed value (1.0 = 100%).
+ * Forward/backward speed (W/S keys) - 80% normal, 100% with boost.
  */
-export const MAX_SPEED = 1.0
+export const FORWARD_SPEED = 0.8
 /**
- * Multiplier applied when boost (Shift) is active.
+ * Turn speed (A/D keys) - always 100% for responsive turning.
  */
-export const BOOST_MULTIPLIER = 1.5
+export const TURN_SPEED = 1.0
+/**
+ * Multiplier applied to forward speed when boost (Shift) is active (0.8 × 1.25 = 1.0).
+ */
+export const BOOST_MULTIPLIER = 1.25
+
+// Creep mode speeds (for precise mapping)
+/**
+ * Forward/backward speed in creep mode (W/S keys) - 70% for precision.
+ */
+export const CREEP_FORWARD_SPEED = 0.7
+/**
+ * Turn speed in creep mode (A/D keys) - 80% for controlled turning.
+ */
+export const CREEP_TURN_SPEED = 0.8
 
 // Keyboard drive ramp (smooth acceleration/deceleration)
 /**

@@ -1,4 +1,3 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useEffect } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -6,7 +5,7 @@ import { Camera, Map as MapIcon, Radar } from "lucide-react"
 
 import TopBar from "./TopBar"
 import CameraPanel from "./CameraPanel"
-import MapCanvas from "./MapCanvas";
+import SlamMapPanel from "./SlamMapPanel"
 import BatteryPanel from "./BatteryPanel";
 import DiagnosticsPanel from "./DiagnosticsPanel"
 import OrientationPanel from "./OrientationPanel"
@@ -17,6 +16,7 @@ import NavigationPanel from "./NavigationPanel"
 import { useBattery } from "./hooks/useBattery";
 import { useControlTransport } from "./hooks/useControlTransport"
 import { useThemeMode } from "./hooks/useThemeMode"
+import { SlamModeProvider } from "./contexts/SlamModeContext"
 
 import { CONTROL_WS_PATH } from "./config"
 
@@ -58,8 +58,9 @@ export default function GordonBotDashboard() {
   }, [])
 
   return (
-    <TooltipProvider>
-      <div className="min-h-dvh w-full bg-background text-foreground">
+    <SlamModeProvider>
+      <TooltipProvider>
+        <div className="min-h-dvh w-full bg-background text-foreground">
         <TopBar
           mode={theme.mode}
           onModeChange={theme.setMode}
@@ -84,14 +85,7 @@ export default function GordonBotDashboard() {
                   <LidarPanel />
                 </TabsContent>
                 <TabsContent value="map" className="mt-3">
-                  <Card className="h-[400px] sm:h-[480px] lg:h-[560px]">
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2 text-base"><MapIcon className="h-4 w-4"/> SLAM Map</CardTitle>
-                    </CardHeader>
-                    <CardContent className="h-full">
-                      <MapCanvas />
-                    </CardContent>
-                  </Card>
+                  <SlamMapPanel />
                 </TabsContent>
               </Tabs>
             </div>
@@ -110,7 +104,8 @@ export default function GordonBotDashboard() {
         <footer className="mx-auto max-w-7xl px-4 pb-6 pt-2 text-center text-xs text-muted-foreground">
           Built with React, Tailwind, and shadcn/ui • Keyboard + On-screen controls • Theme persists in localStorage
         </footer>
-      </div>
-    </TooltipProvider>
+        </div>
+      </TooltipProvider>
+    </SlamModeProvider>
   );
 }

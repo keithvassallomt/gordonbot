@@ -7,9 +7,10 @@ import { Gamepad2 } from "lucide-react"
 import JoystickPad from "@/components/JoystickPad"
 import KV from "@/components/KV"
 
-import { DEADMAN_MS, COMMAND_HZ, MAX_SPEED, BOOST_MULTIPLIER, JOY_ACCEL_PER_S, JOY_DECEL_PER_S, JOY_TURN_ACCEL_PER_S, JOY_TURN_DECEL_PER_S } from "@/components/config"
+import { DEADMAN_MS, COMMAND_HZ, FORWARD_SPEED, TURN_SPEED, BOOST_MULTIPLIER, CREEP_FORWARD_SPEED, CREEP_TURN_SPEED, JOY_ACCEL_PER_S, JOY_DECEL_PER_S, JOY_TURN_ACCEL_PER_S, JOY_TURN_DECEL_PER_S } from "@/components/config"
 import type { ControlTransport, ControlCommand, Vec2 } from "@/components/types"
 import { clamp, useKeyboardDrive, useSmoothedVec, vecToTank } from "@/components/hooks/useControls"
+import { useSlamMode } from "@/components/contexts/SlamModeContext"
 
 /**
  * Drive control panel (tank mode).
@@ -34,6 +35,7 @@ import { clamp, useKeyboardDrive, useSmoothedVec, vecToTank } from "@/components
  * ```
  */
 export default function ControlPanel({ transport }: { transport: ControlTransport }) {
+  const { speedMode } = useSlamMode()
   const [joyVec, setJoyVec] = useState<Vec2>({ x: 0, y: 0 })
   const joySmoothed = useSmoothedVec(joyVec, {
     accelX: JOY_TURN_ACCEL_PER_S,
@@ -47,11 +49,28 @@ export default function ControlPanel({ transport }: { transport: ControlTranspor
 
   /**
    * Combined joystick + keyboard vector, clamped to [-1, 1] per axis.
+   * Note: Speed scaling is applied separately in the command loop.
    */
   const merged: Vec2 = useMemo(() => ({
     x: clamp(joySmoothed.x + keyVec.x, -1, 1),
     y: clamp(joySmoothed.y + keyVec.y, -1, 1),
   }), [joySmoothed, keyVec])
+
+  /**
+   * Scaled keyboard vector (applied FORWARD_SPEED to Y, TURN_SPEED to X).
+   * Respects creep mode if active.
+   * Used to determine which input source (joystick vs keyboard) is contributing.
+   */
+  const scaledKeyVec: Vec2 = useMemo(() => {
+    const isCreep = speedMode === "creep"
+    const baseForwardSpeed = isCreep ? CREEP_FORWARD_SPEED : FORWARD_SPEED
+    const baseTurnSpeed = isCreep ? CREEP_TURN_SPEED : TURN_SPEED
+    const forwardMult = (boost ? BOOST_MULTIPLIER : 1) * baseForwardSpeed
+    return {
+      x: keyVec.x * baseTurnSpeed,
+      y: keyVec.y * forwardMult,
+    }
+  }, [keyVec, boost, speedMode])
 
   /**
    * Update the last-input timestamp whenever the merged vector changes.
@@ -63,6 +82,7 @@ export default function ControlPanel({ transport }: { transport: ControlTranspor
   /**
    * Command loop: computes tank outputs and sends them at a fixed rate.
    * Applies dead‑man, boost multiplier, and clamping before sending.
+   * Keyboard gets speed scaling (80% forward, 100% turn), joystick always 100%.
    * Cleans up the timer on unmount.
    */
   useEffect(() => {
@@ -75,10 +95,15 @@ export default function ControlPanel({ transport }: { transport: ControlTranspor
         lastInputRef.current = now
       }
       const inactive = now - lastInputRef.current > DEADMAN_MS
-      const base = vecToTank(merged)
-      const m = (boost ? BOOST_MULTIPLIER : 1) * MAX_SPEED
-      const left = enabled && !inactive ? clamp(base.left * m, -1, 1) : 0
-      const right = enabled && !inactive ? clamp(base.right * m, -1, 1) : 0
+      // Combine scaled keyboard input with full-speed joystick input
+      // Joystick is always 100% (analog control), keyboard gets speed limiting
+      const finalVec: Vec2 = {
+        x: clamp(joySmoothed.x + scaledKeyVec.x, -1, 1),
+        y: clamp(joySmoothed.y + scaledKeyVec.y, -1, 1),
+      }
+      const base = vecToTank(finalVec)
+      const left = enabled && !inactive ? clamp(base.left, -1, 1) : 0
+      const right = enabled && !inactive ? clamp(base.right, -1, 1) : 0
       const cmd: ControlCommand = { left, right, ts: Date.now() }
       transport.send(cmd)
       setLastCmd(cmd)
@@ -86,7 +111,7 @@ export default function ControlPanel({ transport }: { transport: ControlTranspor
     }
     tick()
     return () => { clearTimeout(id) }
-  }, [merged, boost, enabled, transport])
+  }, [joySmoothed, scaledKeyVec, enabled, transport])
 
   /**
    * Immediately zero the on‑screen joystick vector (keyboard state may still apply).
@@ -97,7 +122,7 @@ export default function ControlPanel({ transport }: { transport: ControlTranspor
     <Card>
       <CardHeader className="space-y-1">
         <CardTitle className="flex items-center gap-2 text-base"><Gamepad2 className="h-4 w-4"/> Drive</CardTitle>
-        <p className="text-xs text-muted-foreground">Tank controls. On-screen joystick + WASD/Arrows. Shift = boost.</p>
+        <p className="text-xs text-muted-foreground">Joystick: 100% analog. Keys: W/S 80% (Shift=100%), A/D 100%.</p>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-start">
@@ -109,6 +134,12 @@ export default function ControlPanel({ transport }: { transport: ControlTranspor
               <div className="text-muted-foreground">Boost</div>
               <Badge variant={boost ? "default" : "secondary"}>{boost ? "ON" : "OFF"}</Badge>
             </div>
+            {speedMode === "creep" && (
+              <div className="col-span-2 flex items-center justify-between rounded-md border border-orange-500 bg-orange-500/10 p-2">
+                <div className="text-orange-600 dark:text-orange-400 font-medium">Creep Mode</div>
+                <Badge variant="outline" className="border-orange-500 text-orange-600 dark:text-orange-400">ACTIVE</Badge>
+              </div>
+            )}
             <div className="col-span-2 flex gap-2">
               <Button className="flex-1" variant="outline" onClick={stopAll}>Stop</Button>
               {transport.status !== "connected" ? (
