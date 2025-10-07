@@ -21,6 +21,8 @@ function clamp(n: number, min = -1, max = 1) {
   return Math.max(min, Math.min(max, n))
 }
 
+const METERS_TO_PX = 100
+
 /**
  * Map canvas placeholder with pan & zoom.
  *
@@ -42,9 +44,11 @@ function clamp(n: number, min = -1, max = 1) {
  * ```
  */
 export default function MapCanvas() {
+  const containerRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const [scale, setScale] = useState(1)
   const [offset, setOffset] = useState<Vec2>({ x: 0, y: 0 })
+  const hasUserAdjustedRef = useRef(false)
   const dragRef = useRef<{ dragging: boolean; x: number; y: number }>({
     dragging: false,
     x: 0,
@@ -66,6 +70,9 @@ export default function MapCanvas() {
     try {
       // Clear the local map data immediately
       clearMapData()
+      hasUserAdjustedRef.current = false
+      setOffset({ x: 0, y: 0 })
+      setScale(1)
 
       const response = await fetch(`${API_BASE}/api/slam/clear`, {
         method: "POST",
@@ -109,46 +116,67 @@ export default function MapCanvas() {
   /**
    * Draw the SLAM occupancy grid map.
    */
-  const drawSlamMap = useCallback((ctx: CanvasRenderingContext2D, mapData: SlamMapMessage) => {
-    const { width, height, resolution, origin, data } = mapData
-    const cellSize = resolution * 100 // convert meters to pixels (1m = 100px at scale 1)
+  const drawSlamMap = useCallback(
+    (
+      ctx: CanvasRenderingContext2D,
+      mapData: SlamMapMessage,
+      toCanvasX: (x: number) => number,
+      toCanvasY: (y: number) => number,
+    ) => {
+      const { width, height, resolution, origin, data } = mapData
+      const cellSize = resolution * METERS_TO_PX
+      const half = cellSize / 2
 
-    // Draw occupancy grid
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const idx = y * width + x
-        const value = data[idx]
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const idx = y * width + x
+          const value = data[idx]
 
-        // Map occupancy value to color
-        // -1 = unknown (gray), 0 = free (white), 100 = occupied (black)
-        let color: string
-        if (value < 0) {
-          color = "#808080" // unknown - gray
-        } else if (value === 0) {
-          color = "#ffffff" // free - white
-        } else {
-          // occupied - interpolate from light gray to black
-          const intensity = Math.floor(255 * (1 - value / 100))
-          color = `rgb(${intensity},${intensity},${intensity})`
+          let color: string
+          if (value < 0) {
+            color = "#808080"
+          } else if (value === 0) {
+            color = "#ffffff"
+          } else {
+            const intensity = Math.floor(255 * (1 - value / 100))
+            color = `rgb(${intensity},${intensity},${intensity})`
+          }
+
+          ctx.fillStyle = color
+          const worldX = origin.x + x * resolution
+          const worldY = origin.y + y * resolution
+          const px = toCanvasX(worldX)
+          const py = toCanvasY(worldY)
+          ctx.fillRect(px - half, py - half, cellSize, cellSize)
         }
-
-        ctx.fillStyle = color
-        const px = (x * cellSize) + (origin.x * 100)
-        const py = -(y * cellSize) - (origin.y * 100) // flip Y for screen coords
-        ctx.fillRect(px, py, cellSize, cellSize)
       }
-    }
-  }, [])
+    },
+    [],
+  )
 
   /**
    * Draw the current frame: grid, SLAM map, and robot pose.
-   * Applies current pan (offset) and zoom (scale).
+   * Applies current pan (offset) and zoom (scale) while keeping the robot centred.
    */
   const draw = useCallback(() => {
-    const canvas = canvasRef.current!
-    const ctx = canvas.getContext("2d")!
-    const { width, height } = canvas
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return
+
+    const dpr = window.devicePixelRatio || 1
+    const width = canvas.width / dpr
+    const height = canvas.height / dpr
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, width, height)
+
+    const robotWorldX = pose?.x ?? 0
+    const robotWorldY = pose?.y ?? 0
+    const robotTheta = pose?.theta ?? 0
+
+    const toCanvasX = (x: number) => (x - robotWorldX) * METERS_TO_PX
+    const toCanvasY = (y: number) => -(y - robotWorldY) * METERS_TO_PX
 
     ctx.save()
     ctx.translate(width / 2 + offset.x, height / 2 + offset.y)
@@ -176,19 +204,12 @@ export default function MapCanvas() {
 
     // Draw SLAM map if available
     if (map) {
-      drawSlamMap(ctx, map)
+      drawSlamMap(ctx, map, toCanvasX, toCanvasY)
     }
 
-    // Robot pose
-    const robotX = pose?.x ? pose.x * 100 : 0 // convert meters to pixels
-    const robotY = pose?.y ? -pose.y * 100 : 0 // flip Y
-    const robotTheta = pose?.theta || 0
-
+    // Robot pose at origin
     ctx.save()
-    ctx.translate(robotX, robotY)
-    ctx.rotate(-robotTheta) // negative because of Y flip
-
-    // Draw robot as triangle
+    ctx.rotate(-robotTheta)
     ctx.fillStyle = "#10b981" // emerald-ish
     ctx.beginPath()
     ctx.moveTo(20, 0)      // front
@@ -197,14 +218,12 @@ export default function MapCanvas() {
     ctx.closePath()
     ctx.fill()
 
-    // Draw heading indicator
     ctx.strokeStyle = "#10b981"
     ctx.lineWidth = 3 / scale
     ctx.beginPath()
     ctx.moveTo(20, 0)
     ctx.lineTo(35, 0)
     ctx.stroke()
-
     ctx.restore()
 
     ctx.restore()
@@ -232,6 +251,16 @@ export default function MapCanvas() {
     draw()
   }, [draw])
 
+  useEffect(() => {
+    if (!map) {
+      return
+    }
+    if (hasUserAdjustedRef.current) {
+      return
+    }
+    setOffset({ x: 0, y: 0 })
+  }, [map])
+
   // Fetch initial LIDAR status
   useEffect(() => {
     const fetchLidarStatus = async () => {
@@ -250,18 +279,36 @@ export default function MapCanvas() {
 
   /**
    * Mouse‑wheel zoom handler. Uses an exponential factor and clamps the scale.
+   * Bound via a non-passive listener so the page does not scroll.
    */
-  const onWheel = (e: React.WheelEvent) => {
-    e.preventDefault()
-    const delta = -e.deltaY
+  const handleWheel = useCallback((event: WheelEvent) => {
+    const delta = -event.deltaY
     const factor = Math.exp(delta * 0.001)
+    hasUserAdjustedRef.current = true
     setScale((s) => clamp(s * factor, 0.25, 4))
-  }
+  }, [])
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    const listener = (event: WheelEvent) => {
+      event.preventDefault()
+      event.stopPropagation()
+      handleWheel(event)
+    }
+
+    container.addEventListener("wheel", listener, { passive: false })
+    return () => {
+      container.removeEventListener("wheel", listener)
+    }
+  }, [handleWheel])
 
   /**
    * Begin panning: remember the initial pointer position in screen pixels.
    */
   const onPointerDown = (e: React.PointerEvent) => {
+    hasUserAdjustedRef.current = true
     dragRef.current = { dragging: true, x: e.clientX, y: e.clientY }
   }
   /**
@@ -283,11 +330,10 @@ export default function MapCanvas() {
   }
 
   return (
-    <div className="relative h-full w-full overflow-hidden rounded-xl border">
+    <div ref={containerRef} className="relative h-full w-full overflow-hidden rounded-xl border">
       <canvas
         ref={canvasRef}
         className="h-full w-full touch-none"
-        onWheel={onWheel}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}

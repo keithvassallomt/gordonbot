@@ -6,13 +6,13 @@ import { Camera, Map as MapIcon, Radar } from "lucide-react"
 
 import TopBar from "./TopBar"
 import CameraPanel from "./CameraPanel"
-import NavigationPanel from "./NavigationPanel"
 import MapCanvas from "./MapCanvas";
 import BatteryPanel from "./BatteryPanel";
 import DiagnosticsPanel from "./DiagnosticsPanel"
 import OrientationPanel from "./OrientationPanel"
 import ControlPanel from "./ControlPanel";
 import LidarPanel from "./LidarPanel";
+import NavigationPanel from "./NavigationPanel"
 
 import { useBattery } from "./hooks/useBattery";
 import { useControlTransport } from "./hooks/useControlTransport"
@@ -70,32 +70,32 @@ export default function GordonBotDashboard() {
         <main className="mx-auto max-w-7xl gap-4 px-4 py-4 grid grid-cols-1 lg:grid-cols-5">
           {/* Left: Camera/Map/LIDAR tabs (span 3 cols on desktop) */}
           <section className="lg:col-span-3 space-y-4">
-            <Tabs defaultValue="camera" className="w-full">
-              <TabsList className="grid w-full grid-cols-3">
-                <TabsTrigger value="camera" className="flex items-center gap-2"><Camera className="h-4 w-4"/> Camera</TabsTrigger>
-                <TabsTrigger value="lidar" className="flex items-center gap-2"><Radar className="h-4 w-4"/> LiDAR</TabsTrigger>
-                <TabsTrigger value="map" className="flex items-center gap-2"><MapIcon className="h-4 w-4"/> Map</TabsTrigger>
-              </TabsList>
-              <TabsContent value="camera" className="mt-3">
-                <CameraPanel />
-                <div className="mt-4">
-                  <NavigationPanel />
-                </div>
-              </TabsContent>
-              <TabsContent value="lidar" className="mt-3">
-                <LidarPanel />
-              </TabsContent>
-              <TabsContent value="map" className="mt-3">
-                <Card className="h-[400px] sm:h-[480px] lg:h-[560px]">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-base"><MapIcon className="h-4 w-4"/> SLAM Map (placeholder)</CardTitle>
-                  </CardHeader>
-                  <CardContent className="h-full">
-                    <MapCanvas />
-                  </CardContent>
-                </Card>
-              </TabsContent>
-            </Tabs>
+            <div>
+              <Tabs defaultValue="camera" className="w-full">
+                <TabsList className="grid w-full grid-cols-3">
+                  <TabsTrigger value="camera" className="flex items-center gap-2"><Camera className="h-4 w-4"/> Camera</TabsTrigger>
+                  <TabsTrigger value="lidar" className="flex items-center gap-2"><Radar className="h-4 w-4"/> LiDAR</TabsTrigger>
+                  <TabsTrigger value="map" className="flex items-center gap-2"><MapIcon className="h-4 w-4"/> Map</TabsTrigger>
+                </TabsList>
+                <TabsContent value="camera" className="mt-3">
+                  <CameraPanel />
+                </TabsContent>
+                <TabsContent value="lidar" className="mt-3">
+                  <LidarPanel />
+                </TabsContent>
+                <TabsContent value="map" className="mt-3">
+                  <Card className="h-[400px] sm:h-[480px] lg:h-[560px]">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2 text-base"><MapIcon className="h-4 w-4"/> SLAM Map</CardTitle>
+                    </CardHeader>
+                    <CardContent className="h-full">
+                      <MapCanvas />
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+              </Tabs>
+            </div>
+            <NavigationPanel />
           </section>
 
           {/* Right: Controls + Battery + Diagnostics (span 2 cols on desktop) */}
