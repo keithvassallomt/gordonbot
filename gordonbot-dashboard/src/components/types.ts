@@ -125,3 +125,31 @@ export type SensorsStatus = {
   tof?: ToFData
   bno055?: BNO055Data
 }
+
+// SLAM domain
+export type SlamMapOrigin = {
+  x: number // meters
+  y: number // meters
+  theta: number // radians
+}
+
+export type SlamMapMessage = {
+  type: "map"
+  ts: number // milliseconds
+  width: number // cells
+  height: number // cells
+  resolution: number // meters per cell
+  origin: SlamMapOrigin
+  data: number[] // occupancy grid: -1=unknown, 0=free, 100=occupied
+}
+
+export type SlamPoseMessage = {
+  type: "pose"
+  ts: number // milliseconds
+  x: number // meters
+  y: number // meters
+  theta: number // radians
+  frame_id: string
+}
+
+export type SlamMessage = SlamMapMessage | SlamPoseMessage

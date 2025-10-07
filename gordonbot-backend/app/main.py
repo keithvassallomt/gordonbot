@@ -90,6 +90,7 @@ from app.routers import sensors as sensors_router
 from app.routers import wakeword as wakeword_router
 from app.routers import orientation as orientation_router
 from app.routers import lidar as lidar_router
+from app.routers import slam as slam_router
 from app.sockets import control as control_socket
 from app.sockets import orientation as orientation_socket
 from app.sockets import lidar as lidar_socket
@@ -139,6 +140,7 @@ api.include_router(sensors_router.router, prefix="")
 api.include_router(wakeword_router.router, prefix="")
 api.include_router(orientation_router.router, prefix="")
 api.include_router(lidar_router.router, prefix="")
+api.include_router(slam_router.router, prefix="")
 
 app.mount(settings.api_prefix, api)
 
