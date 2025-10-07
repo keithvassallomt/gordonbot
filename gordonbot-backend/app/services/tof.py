@@ -79,7 +79,19 @@ def read_distance_mm() -> Optional[int]:
     if distance is None:
         return None
     try:
-        return int(distance)
+        distance = float(distance)
+    except (TypeError, ValueError):
+        return None
+
+    # Library versions disagree on units: newer releases return cm, older return mm.
+    # Treat readings <= 400 as centimetres (sensor max range) and convert to mm.
+    if distance <= 400.0:
+        distance_mm = distance * 10.0
+    else:
+        distance_mm = distance
+
+    try:
+        return int(distance_mm)
     except (TypeError, ValueError):
         return None
 

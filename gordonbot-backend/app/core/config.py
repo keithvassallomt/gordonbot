@@ -132,6 +132,19 @@ class Settings(BaseModel):
         wakeword_audio_command,
     )
 
+    tof_alert_enabled: bool = _getenv_bool("TOF_ALERT_ENABLED", True)
+    tof_alert_audio_path: str = os.getenv(
+        "TOF_ALERT_AUDIO_PATH",
+        str(BACKEND_ROOT / "assets" / "audio" / "alert.wav"),
+    )
+    tof_alert_audio_command: str = os.getenv(
+        "TOF_ALERT_AUDIO_CMD",
+        "ffplay -nodisp -autoexit {path}",
+    )
+    tof_alert_threshold_mm: int = int(os.getenv("TOF_ALERT_THRESHOLD_MM", "50"))
+    tof_alert_retrigger_delta_mm: int = int(os.getenv("TOF_ALERT_RETRIGGER_DELTA_MM", "10"))
+    tof_alert_poll_interval: float = float(os.getenv("TOF_ALERT_POLL_INTERVAL", "0.1"))
+
     intercom_volume_gain: float = float(os.getenv("INTERCOM_VOLUME_GAIN", "1.8"))
 
     # Speech capture / ASR
