@@ -77,7 +77,20 @@ async def start_lidar_scan() -> dict:
     if service is None:
         raise HTTPException(status_code=503, detail="LIDAR service not initialized")
 
+    # If already running, just return success
+    if service.running:
+        return {"ok": True, "message": "LIDAR scan already running"}
+
+    # Try to start scan
     success = await service.start_scan()
+
+    if not success:
+        # If first attempt fails, try reconnecting and starting again
+        log.info("First start attempt failed, trying to reconnect...")
+        await service.disconnect()
+        connected = await service.connect()
+        if connected:
+            success = await service.start_scan()
 
     if not success:
         raise HTTPException(status_code=500, detail="Failed to start LIDAR scan")

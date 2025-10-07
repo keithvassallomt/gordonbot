@@ -6,6 +6,10 @@ import time
 from typing import Optional
 from dataclasses import dataclass
 
+DEFAULT_MOTOR_PWM = 660
+MAX_MOTOR_PWM = 1023
+SET_PWM_COMMAND = 0xF0
+
 log = logging.getLogger(__name__)
 
 try:
@@ -80,6 +84,10 @@ class LidarService:
         self._points_filtered_quality: int = 0
         self._last_error: Optional[str] = None
 
+        # Motor control
+        self._motor_running: bool = False
+        self._motor_pwm: int = 0
+
     @property
     def connected(self) -> bool:
         """Check if LIDAR is connected."""
@@ -89,6 +97,76 @@ class LidarService:
     def running(self) -> bool:
         """Check if scan loop is running."""
         return self._running
+
+    def _get_serial_connection(self):
+        """Return the underlying serial connection if available."""
+        if self._lidar is None:
+            return None
+
+        serial_conn = getattr(self._lidar, "_serial", None)
+        if serial_conn is None or not getattr(serial_conn, "is_open", False):
+            return None
+        return serial_conn
+
+    def _send_motor_pwm(self, serial_conn, pwm: int) -> None:
+        """Send motor PWM command to the lidar."""
+        pwm = int(max(0, min(MAX_MOTOR_PWM, pwm)))
+        payload = pwm.to_bytes(2, "little")
+        size = len(payload)
+        req = bytearray()
+        req.append(0xA5)  # sync byte
+        req.append(SET_PWM_COMMAND)
+        req.append(size)
+        req.extend(payload)
+        checksum = 0
+        for value in req:
+            checksum ^= value
+        req.append(checksum & 0xFF)
+        serial_conn.write(bytes(req))
+        serial_conn.flush()
+
+    def _apply_motor_state(self, enable: bool, target_pwm: int) -> None:
+        """Apply motor state changes (runs in thread)."""
+        serial_conn = self._get_serial_connection()
+        if serial_conn is None:
+            log.debug("Serial connection unavailable; skipping motor state change")
+            return
+
+        if enable:
+            try:
+                serial_conn.dtr = False  # enable motor on A-series devices
+            except Exception as exc:
+                log.debug(f"Failed to set DTR low while enabling motor: {exc}")
+            try:
+                self._send_motor_pwm(serial_conn, target_pwm or DEFAULT_MOTOR_PWM)
+            except Exception as exc:
+                log.warning(f"Failed to set motor PWM to {target_pwm}: {exc}")
+        else:
+            try:
+                self._send_motor_pwm(serial_conn, 0)
+                time.sleep(0.001)
+            except Exception as exc:
+                log.warning(f"Failed to set motor PWM to 0: {exc}")
+            try:
+                serial_conn.dtr = True  # disable motor
+            except Exception as exc:
+                log.debug(f"Failed to set DTR high while disabling motor: {exc}")
+
+    async def _set_motor_state(self, enable: bool, pwm: Optional[int] = None) -> None:
+        """Ensure motor state matches desired value."""
+        # If there's no lidar instance yet, nothing to do.
+        if self._lidar is None:
+            return
+
+        target_pwm = pwm if pwm is not None else DEFAULT_MOTOR_PWM
+        try:
+            await asyncio.to_thread(self._apply_motor_state, enable, target_pwm)
+        except Exception as exc:
+            log.error(f"Failed to apply motor state (enable={enable}): {exc}", exc_info=True)
+            return
+
+        self._motor_running = enable
+        self._motor_pwm = target_pwm if enable else 0
 
     async def connect(self) -> bool:
         """
@@ -116,6 +194,7 @@ class LidarService:
             # The device connection will be verified when we start scanning
 
             self._connected = True
+            await self._set_motor_state(False)
             return True
 
         except Exception as e:
@@ -136,8 +215,11 @@ class LidarService:
             except Exception as e:
                 log.error(f"Error disconnecting LIDAR: {e}")
             finally:
+                await self._set_motor_state(False)
                 self._lidar = None
                 self._connected = False
+                self._motor_running = False
+                self._motor_pwm = 0
 
     async def start_scan(self) -> bool:
         """
@@ -154,28 +236,39 @@ class LidarService:
             log.warning("LIDAR scan already running")
             return True
 
+        await self._set_motor_state(True)
+
         try:
             self._running = True
 
+            # Clear stop event from previous scan
+            if self._lidar is not None:
+                log.info("Clearing stop event before starting scan")
+                self._lidar.stop_event.clear()
+
             # Start the scan coroutine
+            log.info("Creating scan task")
             self._scan_task = asyncio.create_task(
                 self._lidar.simple_scan(make_return_dict=True)
             )
 
             # Start queue processing task
+            log.info("Creating queue processing task")
             self._queue_task = asyncio.create_task(self._process_queue())
 
-            log.info("LIDAR scan started")
+            log.info("LIDAR scan started successfully")
             return True
 
         except Exception as e:
-            log.error(f"Failed to start LIDAR scan: {e}")
+            log.error(f"Failed to start LIDAR scan: {e}", exc_info=True)
             self._running = False
+            await self._set_motor_state(False)
             return False
 
     async def stop_scan(self) -> None:
         """Stop LIDAR scanning."""
         if not self._running:
+            await self._set_motor_state(False)
             return
 
         self._running = False
@@ -183,6 +276,8 @@ class LidarService:
         # Signal stop event
         if self._lidar is not None:
             self._lidar.stop_event.set()
+
+        await self._set_motor_state(False)
 
         # Cancel tasks
         if self._queue_task is not None:
@@ -331,6 +426,8 @@ class LidarService:
             "running": self._running,
             "scan_rate_hz": self._scan_rate_hz,
             "port": self.port,
+            "motor_running": self._motor_running,
+            "motor_pwm": self._motor_pwm,
         }
 
         if self._lidar is not None and self._connected:
@@ -373,6 +470,8 @@ class LidarService:
             "scan_task_alive": self._scan_task is not None and not self._scan_task.done(),
             "queue_task_alive": self._queue_task is not None and not self._queue_task.done(),
             "latest_scan_point_count": len(self._latest_scan.points) if self._latest_scan else 0,
+            "motor_running": self._motor_running,
+            "motor_pwm": self._motor_pwm,
         }
 
 

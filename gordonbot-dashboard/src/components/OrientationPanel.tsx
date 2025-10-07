@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ChevronDown, Compass, RefreshCcw, RotateCcw, Save } from "lucide-react"
+import { ChevronDown, Compass, Loader2, RefreshCcw, RotateCcw, Save } from "lucide-react"
 import * as THREE from "three"
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js"
 
@@ -47,6 +47,7 @@ export default function OrientationPanel() {
     acknowledgeNotification,
     reconnecting,
     calibrating,
+    initializing,
   } = useOrientation()
 
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -483,11 +484,20 @@ export default function OrientationPanel() {
   }, [frame])
 
   const statusMeta = useMemo(() => {
+    if (initializing) {
+      return {
+        badgeLabel: "Initializing",
+        badgeVariant: "outline" as const,
+        message: "Starting orientation system…",
+        showSpinner: true,
+      }
+    }
     if (calibrating) {
       return {
         badgeLabel: "Calibrating",
         badgeVariant: "secondary" as const,
         message: "Running calibration routine",
+        showSpinner: false,
       }
     }
     if (statusNote) {
@@ -503,13 +513,14 @@ export default function OrientationPanel() {
           : statusNote.kind === "error"
             ? "Error"
             : "Info"
-      return { badgeLabel, badgeVariant, message: statusNote.message ?? "Status updated" }
+      return { badgeLabel, badgeVariant, message: statusNote.message ?? "Status updated", showSpinner: false }
     }
     if (status === "connected" && frame) {
       return {
         badgeLabel: "Live",
         badgeVariant: "secondary" as const,
         message: "Orientation stream live",
+        showSpinner: false,
       }
     }
     if (status === "connecting" || reconnecting) {
@@ -517,14 +528,16 @@ export default function OrientationPanel() {
         badgeLabel: reconnecting ? "Reconnecting" : "Connecting",
         badgeVariant: "outline" as const,
         message: "Connecting to orientation stream…",
+        showSpinner: true,
       }
     }
     return {
       badgeLabel: "Offline",
       badgeVariant: "destructive" as const,
       message: "Orientation stream offline",
+      showSpinner: false,
     }
-  }, [calibrating, frame, reconnecting, status, statusNote])
+  }, [calibrating, frame, initializing, reconnecting, status, statusNote])
 
   const calib = frame?.calib ?? {}
   const calibrationItems = [
@@ -543,9 +556,12 @@ export default function OrientationPanel() {
       </CardHeader>
       <CardContent className="space-y-4 text-sm">
         <div className="flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">Status</div>
-            <div className="text-sm">{statusMeta.message}</div>
+          <div className="flex items-center gap-2">
+            {statusMeta.showSpinner && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+            <div>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">Status</div>
+              <div className="text-sm">{statusMeta.message}</div>
+            </div>
           </div>
           <Badge variant={statusMeta.badgeVariant}>{statusMeta.badgeLabel}</Badge>
         </div>

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Move, ZoomIn, ZoomOut, RotateCcw } from "lucide-react"
+import { Move, ZoomIn, ZoomOut, RotateCcw, Radar } from "lucide-react"
 import { useSLAM } from "@/components/hooks/useSLAM"
 import type { SlamMapMessage } from "@/components/types"
 import { API_BASE } from "@/components/config"
@@ -54,6 +54,8 @@ export default function MapCanvas() {
   // SLAM data hook
   const { map, pose, status, clearMapData } = useSLAM()
   const [clearing, setClearing] = useState(false)
+  const [lidarRunning, setLidarRunning] = useState(true)
+  const [lidarToggling, setLidarToggling] = useState(false)
 
   const handleClearMap = useCallback(async () => {
     if (!confirm("Clear the SLAM map? This will restart the mapping process.")) {
@@ -82,6 +84,27 @@ export default function MapCanvas() {
       setClearing(false)
     }
   }, [clearMapData])
+
+  const handleToggleLidar = useCallback(async () => {
+    setLidarToggling(true)
+    try {
+      const endpoint = lidarRunning ? "/api/lidar/stop" : "/api/lidar/start"
+      const response = await fetch(`${API_BASE}${endpoint}`, {
+        method: "POST",
+      })
+
+      if (!response.ok) {
+        throw new Error(`Failed to ${lidarRunning ? "stop" : "start"} LIDAR: ${response.statusText}`)
+      }
+
+      setLidarRunning(!lidarRunning)
+    } catch (error) {
+      console.error("Error toggling LIDAR:", error)
+      alert(`Failed to ${lidarRunning ? "stop" : "start"} LIDAR. Check console for details.`)
+    } finally {
+      setLidarToggling(false)
+    }
+  }, [lidarRunning])
 
   /**
    * Draw the SLAM occupancy grid map.
@@ -209,6 +232,22 @@ export default function MapCanvas() {
     draw()
   }, [draw])
 
+  // Fetch initial LIDAR status
+  useEffect(() => {
+    const fetchLidarStatus = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/lidar/status`)
+        if (response.ok) {
+          const data = await response.json()
+          setLidarRunning(data.running ?? true)
+        }
+      } catch (error) {
+        console.error("Error fetching LIDAR status:", error)
+      }
+    }
+    fetchLidarStatus()
+  }, [])
+
   /**
    * Mouse‑wheel zoom handler. Uses an exponential factor and clamps the scale.
    */
@@ -269,7 +308,17 @@ export default function MapCanvas() {
           SLAM {status}
         </Badge>
       </div>
-      <div className="pointer-events-auto absolute right-2 top-2">
+      <div className="pointer-events-auto absolute right-2 top-2 flex gap-2">
+        <Button
+          size="sm"
+          variant={lidarRunning ? "secondary" : "default"}
+          onClick={handleToggleLidar}
+          disabled={lidarToggling}
+          className="flex items-center gap-1"
+        >
+          <Radar className={`h-4 w-4 ${lidarRunning ? "animate-spin" : ""}`} />
+          {lidarToggling ? "..." : lidarRunning ? "Stop LIDAR" : "Start LIDAR"}
+        </Button>
         <Button
           size="sm"
           variant="destructive"

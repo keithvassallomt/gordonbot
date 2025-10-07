@@ -90,6 +90,7 @@ export function useOrientation() {
   const [notification, setNotification] = useState<OrientationNotification | null>(null)
   const [isCalibrating, setIsCalibrating] = useState(false)
   const [isReconnecting, setIsReconnecting] = useState(false)
+  const [isInitialDelay, setIsInitialDelay] = useState(true)
 
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<number | null>(null)
@@ -167,6 +168,17 @@ export function useOrientation() {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return
 
     clearReconnectTimer()
+
+    // Close any existing WebSocket that's still connecting or closing
+    if (wsRef.current) {
+      try {
+        wsRef.current.close()
+      } catch (err) {
+        console.debug("Failed to close pending WebSocket", err)
+      }
+      wsRef.current = null
+    }
+
     const url = resolveWsUrl(ORIENTATION_WS_PATH)
     const socket = new WebSocket(url)
     wsRef.current = socket
@@ -235,8 +247,15 @@ export function useOrientation() {
 
   useEffect(() => {
     stopRef.current = false
-    connect()
+
+    // Delay connection by 5 seconds to avoid race conditions on startup
+    const connectionTimer = window.setTimeout(() => {
+      setIsInitialDelay(false)
+      connect()
+    }, 5000)
+
     return () => {
+      window.clearTimeout(connectionTimer)
       disconnect()
     }
   }, [connect, disconnect])
@@ -273,5 +292,6 @@ export function useOrientation() {
     acknowledgeNotification,
     reconnecting: isReconnecting,
     calibrating: isCalibrating,
+    initializing: isInitialDelay,
   }
 }
