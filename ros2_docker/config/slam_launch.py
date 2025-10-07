@@ -51,7 +51,7 @@ def generate_launch_description():
                 'use_sim_time': use_sim_time,
                 'backend_url': backend_http_url,
                 'poll_rate_hz': 20.0,
-                'wheel_base_m': 0.14,
+                'wheel_base_m': 0.085,
                 'odom_frame': 'odom',
                 'base_frame': 'base_link'
             }]
@@ -66,10 +66,22 @@ def generate_launch_description():
             parameters=[{
                 'use_sim_time': use_sim_time,
                 'backend_url': backend_http_url,
-                'poll_rate_hz': 50.0,
+                'poll_rate_hz': 20.0,  # Reduced from 50Hz to match backend cache update rate
                 'frame_id': 'imu_link',
                 'base_frame': 'base_link'
             }]
+        ),
+
+        # EKF node - fuses wheel odometry (position) with IMU (orientation)
+        # Output: /odom_fused topic with accurate pose combining both sources
+        Node(
+            package='robot_localization',
+            executable='ekf_node',
+            name='ekf_filter_node',
+            output='screen',
+            parameters=['/config/ekf_params.yaml',
+                       {'use_sim_time': use_sim_time}],
+            remappings=[('odometry/filtered', 'odom_fused')]
         ),
 
         # Static TF: base_link -> laser
@@ -81,6 +93,7 @@ def generate_launch_description():
         ),
 
         # SLAM Toolbox (async mode)
+        # Now uses /odom_fused from EKF instead of raw /odom
         Node(
             package='slam_toolbox',
             executable='async_slam_toolbox_node',
@@ -89,7 +102,8 @@ def generate_launch_description():
             parameters=[
                 '/config/slam_toolbox_params.yaml',
                 {'use_sim_time': use_sim_time}
-            ]
+            ],
+            remappings=[('odom', 'odom_fused')]
         ),
 
         # Map bridge node (serves map via WebSocket)

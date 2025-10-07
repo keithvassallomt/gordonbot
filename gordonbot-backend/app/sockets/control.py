@@ -152,7 +152,7 @@ async def ws_control(ws: WebSocket):
                 await asyncio.sleep(0.2)
                 if seconds_since_last_command() > DEADMAN_SECONDS:
                     if not wd_state["tripped"]:
-                        log.warning("watchdog: dead-man timeout %.1fs reached; stopping", DEADMAN_SECONDS)
+                        log.debug("watchdog: dead-man timeout %.1fs reached; stopping", DEADMAN_SECONDS)
                         wd_state["tripped"] = True
                     stop_all_motors()
                 else:

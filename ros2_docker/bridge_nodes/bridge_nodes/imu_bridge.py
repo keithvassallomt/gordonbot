@@ -78,10 +78,23 @@ class ImuBridge(Node):
         imu.header.frame_id = self.frame_id
 
         # Orientation (quaternion)
-        imu.orientation.w = quat.get('w', 1.0)
-        imu.orientation.x = quat.get('x', 0.0)
-        imu.orientation.y = quat.get('y', 0.0)
-        imu.orientation.z = quat.get('z', 0.0)
+        # Normalize quaternion sign to avoid ambiguity (q and -q are the same rotation)
+        # Convention: ensure w >= 0
+        qw = quat.get('w', 1.0)
+        qx = quat.get('x', 0.0)
+        qy = quat.get('y', 0.0)
+        qz = quat.get('z', 0.0)
+
+        if qw < 0:
+            qw = -qw
+            qx = -qx
+            qy = -qy
+            qz = -qz
+
+        imu.orientation.w = qw
+        imu.orientation.x = qx
+        imu.orientation.y = qy
+        imu.orientation.z = qz
 
         # Angular velocity
         imu.angular_velocity.x = ang_vel.get('x', 0.0) or 0.0

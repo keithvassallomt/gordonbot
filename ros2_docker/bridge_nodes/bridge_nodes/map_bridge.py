@@ -107,11 +107,24 @@ class MapBridge(Node):
 
             # Extract orientation (quaternion -> yaw)
             quat = transform.transform.rotation
+
+            # Normalize quaternion to avoid sign ambiguity (q and -q represent same rotation)
+            # Convention: ensure w >= 0
+            qw = quat.w
+            qx = quat.x
+            qy = quat.y
+            qz = quat.z
+            if qw < 0:
+                qw = -qw
+                qx = -qx
+                qy = -qy
+                qz = -qz
+
             # Convert quaternion to yaw (theta)
             # For 2D: yaw = atan2(2*(qw*qz + qx*qy), 1 - 2*(qy^2 + qz^2))
             theta = math.atan2(
-                2.0 * (quat.w * quat.z + quat.x * quat.y),
-                1.0 - 2.0 * (quat.y * quat.y + quat.z * quat.z)
+                2.0 * (qw * qz + qx * qy),
+                1.0 - 2.0 * (qy * qy + qz * qz)
             )
 
             with self.pose_lock:

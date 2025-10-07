@@ -100,16 +100,18 @@ class OdomBridge(Node):
         self.prev_right_dist = right_dist
 
         # Differential drive odometry
+        # Calculate distance traveled (average of both wheels)
         delta_dist = (delta_left + delta_right) / 2.0
-        delta_theta = (delta_right - delta_left) / self.wheel_base
 
-        # Update pose
-        self.x += delta_dist * math.cos(self.theta + delta_theta / 2.0)
-        self.y += delta_dist * math.sin(self.theta + delta_theta / 2.0)
-        self.theta += delta_theta
+        # NOTE: We do NOT calculate theta from encoders - it's garbage!
+        # Orientation comes from IMU via EKF instead.
+        # delta_theta = (delta_right - delta_left) / self.wheel_base  # REMOVED
 
-        # Normalize theta to [-pi, pi]
-        self.theta = math.atan2(math.sin(self.theta), math.cos(self.theta))
+        # Update position only (orientation comes from EKF/IMU)
+        # Use current theta from EKF for position update
+        self.x += delta_dist * math.cos(self.theta)
+        self.y += delta_dist * math.sin(self.theta)
+        # self.theta += delta_theta  # REMOVED - no encoder-based orientation!
 
         # Publish odometry
         self._publish_odometry()
@@ -143,18 +145,22 @@ class OdomBridge(Node):
         # Publish
         self.odom_pub.publish(odom)
 
+        # NOTE: TF broadcasting disabled - EKF publishes odom→base_link TF instead
+        # The EKF fuses wheel odometry (position) with IMU (orientation)
+        # This eliminates encoder-based orientation from the TF tree
+        #
         # Broadcast TF
-        t = TransformStamped()
-        t.header.stamp = now.to_msg()
-        t.header.frame_id = self.odom_frame
-        t.child_frame_id = self.base_frame
-        t.transform.translation.x = self.x
-        t.transform.translation.y = self.y
-        t.transform.translation.z = 0.0
-        t.transform.rotation.z = qz
-        t.transform.rotation.w = qw
-
-        self.tf_broadcaster.sendTransform(t)
+        # t = TransformStamped()
+        # t.header.stamp = now.to_msg()
+        # t.header.frame_id = self.odom_frame
+        # t.child_frame_id = self.base_frame
+        # t.transform.translation.x = self.x
+        # t.transform.translation.y = self.y
+        # t.transform.translation.z = 0.0
+        # t.transform.rotation.z = qz
+        # t.transform.rotation.w = qw
+        #
+        # self.tf_broadcaster.sendTransform(t)
 
 
 def main(args=None):
