@@ -23,6 +23,7 @@ setup(
             'lidar_bridge = bridge_nodes.lidar_bridge:main',
             'odom_bridge = bridge_nodes.odom_bridge:main',
             'imu_bridge = bridge_nodes.imu_bridge:main',
+            'imu_odom_bridge = bridge_nodes.imu_odom_bridge:main',
             'map_bridge = bridge_nodes.map_bridge:main',
         ],
     },

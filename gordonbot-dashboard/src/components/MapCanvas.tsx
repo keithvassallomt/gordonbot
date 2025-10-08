@@ -187,7 +187,7 @@ export default function MapCanvas() {
 
     // Robot pose at origin
     ctx.save()
-    ctx.rotate(robotTheta)
+    ctx.rotate(robotTheta) // Canvas positive rotation is clockwise; raw theta already accounts for that
     ctx.fillStyle = "#10b981" // emerald-ish
     ctx.beginPath()
     ctx.moveTo(20, 0)      // front

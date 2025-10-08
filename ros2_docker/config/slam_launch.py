@@ -41,21 +41,22 @@ def generate_launch_description():
             }]
         ),
 
-        # Odometry bridge node
-        Node(
-            package='bridge_nodes',
-            executable='odom_bridge',
-            name='odom_bridge',
-            output='screen',
-            parameters=[{
-                'use_sim_time': use_sim_time,
-                'backend_url': backend_http_url,
-                'poll_rate_hz': 20.0,
-                'wheel_base_m': 0.085,
-                'odom_frame': 'odom',
-                'base_frame': 'base_link'
-            }]
-        ),
+        # Odometry bridge node - DISABLED
+        # Encoders are garbage - SLAM uses LIDAR scan matching for position instead
+        # Node(
+        #     package='bridge_nodes',
+        #     executable='odom_bridge',
+        #     name='odom_bridge',
+        #     output='screen',
+        #     parameters=[{
+        #         'use_sim_time': use_sim_time,
+        #         'backend_url': backend_http_url,
+        #         'poll_rate_hz': 20.0,
+        #         'wheel_base_m': 0.085,
+        #         'odom_frame': 'odom',
+        #         'base_frame': 'base_link'
+        #     }]
+        # ),
 
         # IMU bridge node
         Node(
@@ -72,16 +73,30 @@ def generate_launch_description():
             }]
         ),
 
-        # EKF node - fuses wheel odometry (position) with IMU (orientation)
-        # Output: /odom_fused topic with accurate pose combining both sources
+        # EKF node - DISABLED (no encoders to fuse)
+        # SLAM gets position from LIDAR scan matching, orientation from IMU directly
+        # Node(
+        #     package='robot_localization',
+        #     executable='ekf_node',
+        #     name='ekf_filter_node',
+        #     output='screen',
+        #     parameters=['/config/ekf_params.yaml',
+        #                {'use_sim_time': use_sim_time}],
+        #     remappings=[('odometry/filtered', 'odom_fused')]
+        # ),
+
+        # IMU-based odometry (publishes /odom with IMU orientation, position at origin)
+        # SLAM will provide actual position via map→odom transform based on LIDAR scan matching
         Node(
-            package='robot_localization',
-            executable='ekf_node',
-            name='ekf_filter_node',
+            package='bridge_nodes',
+            executable='imu_odom_bridge',
+            name='imu_odom_bridge',
             output='screen',
-            parameters=['/config/ekf_params.yaml',
-                       {'use_sim_time': use_sim_time}],
-            remappings=[('odometry/filtered', 'odom_fused')]
+            parameters=[{
+                'use_sim_time': use_sim_time,
+                'odom_frame': 'odom',
+                'base_frame': 'base_link'
+            }]
         ),
 
         # Static TF: base_link -> laser
@@ -93,7 +108,8 @@ def generate_launch_description():
         ),
 
         # SLAM Toolbox (async mode)
-        # Now uses /odom_fused from EKF instead of raw /odom
+        # Uses LIDAR scan matching for position, IMU (via /odom) for orientation
+        # NO ENCODERS!
         Node(
             package='slam_toolbox',
             executable='async_slam_toolbox_node',
@@ -102,8 +118,7 @@ def generate_launch_description():
             parameters=[
                 '/config/slam_toolbox_params.yaml',
                 {'use_sim_time': use_sim_time}
-            ],
-            remappings=[('odom', 'odom_fused')]
+            ]
         ),
 
         # Map bridge node (serves map via WebSocket)
