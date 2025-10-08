@@ -65,26 +65,52 @@ export default function MapCanvas({ showProcessed = false }: MapCanvasProps) {
   const { map, pose, status, clearMapData } = useSLAM()
   const [clearing, setClearing] = useState(false)
 
-  // Processed map image state
-  const [processedMapImage, setProcessedMapImage] = useState<HTMLImageElement | null>(null)
+  // Processed map occupancy grid state
+  const [processedMapData, setProcessedMapData] = useState<SlamMapMessage | null>(null)
   const [processedMapLoading, setProcessedMapLoading] = useState(false)
 
-  // Load processed map image when showProcessed changes to true
+  // Load processed map grid when requested
   useEffect(() => {
-    if (showProcessed && !processedMapImage) {
-      setProcessedMapLoading(true)
-      const img = new Image()
-      img.onload = () => {
-        setProcessedMapImage(img)
-        setProcessedMapLoading(false)
-      }
-      img.onerror = () => {
-        console.error("Failed to load processed map image")
-        setProcessedMapLoading(false)
-      }
-      img.src = `${API_BASE}/api/slam/map/processed?t=${Date.now()}`
+    if (!showProcessed) {
+      return
     }
-  }, [showProcessed, processedMapImage])
+
+    let cancelled = false
+
+    const loadProcessedMap = async () => {
+      setProcessedMapLoading(true)
+      try {
+        const response = await fetch(`${API_BASE}/api/slam/map/processed-grid?t=${Date.now()}`)
+        if (!response.ok) {
+          throw new Error(`Failed to load processed map: ${response.statusText}`)
+        }
+        const data = await response.json()
+        if (!cancelled) {
+          setProcessedMapData(data as SlamMapMessage)
+        }
+      } catch (error) {
+        console.error("Failed to load processed map grid:", error)
+        if (!cancelled) {
+          setProcessedMapData(null)
+        }
+      } finally {
+        if (!cancelled) {
+          setProcessedMapLoading(false)
+        }
+      }
+    }
+
+    // Avoid refetching if we already have data
+    if (!processedMapData) {
+      loadProcessedMap()
+    } else {
+      setProcessedMapLoading(false)
+    }
+
+    return () => {
+      cancelled = true
+    }
+  }, [showProcessed, processedMapData])
 
   const handleClearMap = useCallback(async () => {
     if (!confirm("Clear the SLAM map? This will restart the mapping process.")) {
@@ -95,7 +121,7 @@ export default function MapCanvas({ showProcessed = false }: MapCanvasProps) {
     try {
       // Clear the local map data immediately
       clearMapData()
-      setProcessedMapImage(null) // Clear processed map image
+      setProcessedMapData(null) // Clear processed map cache
       hasUserAdjustedRef.current = false
       setOffset({ x: 0, y: 0 })
       setScale(1)
@@ -208,21 +234,10 @@ export default function MapCanvas({ showProcessed = false }: MapCanvasProps) {
     }
     ctx.globalAlpha = 1
 
-    // Draw processed map image if available and requested
-    if (showProcessed && processedMapImage) {
-      // Draw the processed map centered at origin
-      const imgWidth = processedMapImage.width
-      const imgHeight = processedMapImage.height
-      ctx.drawImage(
-        processedMapImage,
-        -imgWidth / 2,
-        -imgHeight / 2,
-        imgWidth,
-        imgHeight
-      )
-    } else if (map) {
-      // Draw live SLAM map if available
-      drawSlamMap(ctx, map, toCanvasX, toCanvasY)
+    const mapToDraw = showProcessed && processedMapData ? processedMapData : map
+
+    if (mapToDraw) {
+      drawSlamMap(ctx, mapToDraw, toCanvasX, toCanvasY)
     }
 
     // Robot pose at origin
@@ -245,7 +260,7 @@ export default function MapCanvas({ showProcessed = false }: MapCanvasProps) {
     ctx.restore()
 
     ctx.restore()
-  }, [scale, offset, map, pose, drawSlamMap, showProcessed, processedMapImage])
+  }, [scale, offset, map, pose, drawSlamMap, showProcessed, processedMapData])
 
   useEffect(() => {
     const canvas = canvasRef.current!

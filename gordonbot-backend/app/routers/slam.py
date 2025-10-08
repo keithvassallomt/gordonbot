@@ -296,3 +296,29 @@ async def get_processed_map():
             status_code=500,
             detail=f"Error retrieving processed map: {str(e)}"
         )
+
+
+@router.get("/slam/map/processed-grid", tags=["slam"])
+async def get_processed_map_grid():
+    """
+    Get the post-processed map as a SlamMapMessage-compatible payload.
+
+    Returns the processed occupancy grid data so the frontend can render it
+    with the same pan/zoom behaviour as the live SLAM map.
+    """
+    try:
+        message = default_processor.load_processed_map_as_message()
+        if message is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Processed map not found. Save a map first."
+            )
+        return message
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Error retrieving processed map grid: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error retrieving processed map grid: {str(e)}"
+        )

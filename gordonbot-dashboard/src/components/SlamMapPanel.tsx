@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge"
 import { Map as MapIcon, Save, Maximize2, Minimize2, RotateCcw } from "lucide-react"
 import MapCanvas from "./MapCanvas"
 import { useSlamMode } from "./contexts/SlamModeContext"
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { API_BASE } from "./config"
 import { useSavedMap } from "./hooks/useSavedMap"
 
@@ -21,16 +21,27 @@ export default function SlamMapPanel() {
   const { slamMode, setSlamMode, speedMode, setSpeedMode } = useSlamMode()
   const [isSaving, setIsSaving] = useState(false)
   const [isClearing, setIsClearing] = useState(false)
-  const { hasSavedMap, refresh: refreshSavedMap } = useSavedMap()
+  const { hasSavedMap, loading, refresh: refreshSavedMap } = useSavedMap()
   const [isExpanded, setIsExpanded] = useState(false)
   const [showProcessedMap, setShowProcessedMap] = useState(false)
+  const userExpandedRef = useRef(false)
+  const prevHasSavedMapRef = useRef<boolean | null>(null)
 
   // Force expanded mode if no saved map exists
   useEffect(() => {
-    if (!hasSavedMap) {
-      setIsExpanded(true)
+    if (loading) {
+      return
     }
-  }, [hasSavedMap])
+
+    if (prevHasSavedMapRef.current !== hasSavedMap) {
+      prevHasSavedMapRef.current = hasSavedMap
+      userExpandedRef.current = false
+    }
+
+    if (!userExpandedRef.current) {
+      setIsExpanded(!hasSavedMap)
+    }
+  }, [hasSavedMap, loading])
 
   const handleClearMap = useCallback(async () => {
     if (!confirm("Clear the SLAM map? This will restart the mapping process.")) {
@@ -217,7 +228,10 @@ export default function SlamMapPanel() {
           <Button
             size="sm"
             variant="secondary"
-            onClick={() => setIsExpanded(!isExpanded)}
+            onClick={() => {
+              userExpandedRef.current = true
+              setIsExpanded(!isExpanded)
+            }}
             className="absolute bottom-4 right-4 z-10 h-8 w-8 p-0"
             title={isExpanded ? "Collapse" : "Expand"}
           >

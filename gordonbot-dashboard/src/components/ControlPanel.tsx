@@ -35,7 +35,7 @@ import { useSlamMode } from "@/components/contexts/SlamModeContext"
  * ```
  */
 export default function ControlPanel({ transport }: { transport: ControlTransport }) {
-  const { speedMode } = useSlamMode()
+  const { speedMode, setSpeedMode } = useSlamMode()
   const [joyVec, setJoyVec] = useState<Vec2>({ x: 0, y: 0 })
   const joySmoothed = useSmoothedVec(joyVec, {
     accelX: JOY_TURN_ACCEL_PER_S,
@@ -61,16 +61,17 @@ export default function ControlPanel({ transport }: { transport: ControlTranspor
    * Respects creep mode if active.
    * Used to determine which input source (joystick vs keyboard) is contributing.
    */
+  const creepActive = speedMode === "creep"
+
   const scaledKeyVec: Vec2 = useMemo(() => {
-    const isCreep = speedMode === "creep"
-    const baseForwardSpeed = isCreep ? CREEP_FORWARD_SPEED : FORWARD_SPEED
-    const baseTurnSpeed = isCreep ? CREEP_TURN_SPEED : TURN_SPEED
+    const baseForwardSpeed = creepActive ? CREEP_FORWARD_SPEED : FORWARD_SPEED
+    const baseTurnSpeed = creepActive ? CREEP_TURN_SPEED : TURN_SPEED
     const forwardMult = (boost ? BOOST_MULTIPLIER : 1) * baseForwardSpeed
     return {
       x: keyVec.x * baseTurnSpeed,
       y: keyVec.y * forwardMult,
     }
-  }, [keyVec, boost, speedMode])
+  }, [keyVec, boost, creepActive])
 
   /**
    * Update the last-input timestamp whenever the merged vector changes.
@@ -122,7 +123,7 @@ export default function ControlPanel({ transport }: { transport: ControlTranspor
     <Card>
       <CardHeader className="space-y-1">
         <CardTitle className="flex items-center gap-2 text-base"><Gamepad2 className="h-4 w-4"/> Drive</CardTitle>
-        <p className="text-xs text-muted-foreground">Joystick: 100% analog. Keys: W/S 80% (Shift=100%), A/D 100%.</p>
+        <p className="text-xs text-muted-foreground">Joystick: 100% analog. Keys: W/S 80% (Shift=100%), A/D 100%. Use creep mode for precision.</p>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-start">
@@ -134,7 +135,14 @@ export default function ControlPanel({ transport }: { transport: ControlTranspor
               <div className="text-muted-foreground">Boost</div>
               <Badge variant={boost ? "default" : "secondary"}>{boost ? "ON" : "OFF"}</Badge>
             </div>
-            {speedMode === "creep" && (
+            <Button
+              className="col-span-2"
+              variant={creepActive ? "default" : "outline"}
+              onClick={() => setSpeedMode(speedMode === "creep" ? "normal" : "creep")}
+            >
+              {speedMode === "creep" ? "Disable Creep" : "Enable Creep"}
+            </Button>
+            {creepActive && (
               <div className="col-span-2 flex items-center justify-between rounded-md border border-orange-500 bg-orange-500/10 p-2">
                 <div className="text-orange-600 dark:text-orange-400 font-medium">Creep Mode</div>
                 <Badge variant="outline" className="border-orange-500 text-orange-600 dark:text-orange-400">ACTIVE</Badge>
@@ -156,7 +164,7 @@ export default function ControlPanel({ transport }: { transport: ControlTranspor
           <div>S/↓ Back</div>
           <div>A/← Turn L</div>
           <div>D/→ Turn R</div>
-          <div className="col-span-3">Shift = Boost • Dead-man {DEADMAN_MS}ms</div>
+          <div className="col-span-3">Shift = Boost • Creep Toggle = Slow Mode • Dead-man {DEADMAN_MS}ms</div>
         </div>
       </CardContent>
     </Card>

@@ -8,8 +8,9 @@ for better navigation and visualization.
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any, List
 import cv2
 import numpy as np
 import yaml
@@ -106,6 +107,87 @@ class MapProcessor:
         except Exception as e:
             log.error(f"Error processing map: {e}", exc_info=True)
             return False
+
+    def load_processed_map_as_message(self) -> Optional[Dict[str, Any]]:
+        """
+        Load the processed map from disk and convert it to a SlamMapMessage-like payload.
+
+        Returns:
+            Dict containing map metadata and flattened occupancy data, or None if unavailable.
+        """
+        maps_path = Path(__file__).parent.parent.parent.parent / "ros2_docker" / "maps"
+        processed_yaml_path = maps_path / "saved_map_processed.yaml"
+
+        if not processed_yaml_path.exists():
+            log.warning("Processed map YAML not found")
+            return None
+
+        try:
+            with open(processed_yaml_path, "r") as f:
+                yaml_data = yaml.safe_load(f)
+        except Exception as exc:
+            log.error(f"Failed to read processed map YAML: {exc}")
+            return None
+
+        resolution = yaml_data.get("resolution")
+        origin = yaml_data.get("origin", [0.0, 0.0, 0.0])
+        if resolution is None:
+            log.error("Processed map YAML missing resolution")
+            return None
+
+        # Determine image path, defaulting to saved_map_processed.pgm in maps directory
+        image_name = yaml_data.get("image", "saved_map_processed.pgm")
+        processed_pgm_path = (processed_yaml_path.parent / image_name).resolve()
+
+        if not processed_pgm_path.exists():
+            log.error("Processed map image not found: %s", processed_pgm_path)
+            return None
+
+        map_image = cv2.imread(str(processed_pgm_path), cv2.IMREAD_GRAYSCALE)
+        if map_image is None:
+            log.error("Failed to load processed map image: %s", processed_pgm_path)
+            return None
+
+        # Flip vertically to align with ROS OccupancyGrid indexing (origin at bottom-left)
+        map_image = np.flipud(map_image)
+        height, width = map_image.shape
+
+        free_thresh = yaml_data.get("free_thresh", 0.196)
+        occupied_thresh = yaml_data.get("occupied_thresh", 0.65)
+
+        data: List[int] = []
+        for pixel in map_image.flatten():
+            if pixel == 205:  # Unknown
+                value = -1
+            else:
+                occupancy = (255 - pixel) / 255.0
+                if occupancy > occupied_thresh:
+                    value = 100
+                elif occupancy < free_thresh:
+                    value = 0
+                else:
+                    value = -1
+            data.append(int(value))
+
+        origin_x = origin[0] if len(origin) > 0 else 0.0
+        origin_y = origin[1] if len(origin) > 1 else 0.0
+        origin_theta = origin[2] if len(origin) > 2 else 0.0
+
+        message: Dict[str, Any] = {
+            "type": "map",
+            "ts": int(time.time() * 1000),
+            "width": width,
+            "height": height,
+            "resolution": float(resolution),
+            "origin": {
+                "x": float(origin_x),
+                "y": float(origin_y),
+                "theta": float(origin_theta),
+            },
+            "data": data,
+        }
+
+        return message
 
     def _apply_morphology(self, image: np.ndarray) -> np.ndarray:
         """
