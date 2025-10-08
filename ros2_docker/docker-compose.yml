@@ -9,8 +9,8 @@ services:
     volumes:
       # Mount config files
       - ./config:/config:ro
-      # Mount maps directory for persistence
-      - ./maps:/maps
+      # Mount maps directory for persistence (maps to /ros2_ws/maps inside container)
+      - ./maps:/ros2_ws/maps
       # Share /dev for potential hardware access (if needed)
       - /dev:/dev
     environment:

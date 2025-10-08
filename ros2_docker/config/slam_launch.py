@@ -17,6 +17,16 @@ def generate_launch_description():
     backend_http_url = os.environ.get('BACKEND_URL', 'http://localhost:8000')
     backend_ws_url = os.environ.get('BACKEND_WS_URL', 'ws://localhost:8000')
 
+    # Check if saved map exists
+    saved_map_path = '/ros2_ws/maps/saved_map'
+    map_exists = os.path.exists(f'{saved_map_path}.data') and os.path.exists(f'{saved_map_path}.posegraph')
+
+    # Determine SLAM mode: localization if map exists, mapping if not
+    slam_mode = 'localization' if map_exists else 'mapping'
+
+    print(f"[SLAM Launch] Saved map {'found' if map_exists else 'not found'}")
+    print(f"[SLAM Launch] Starting in {slam_mode} mode")
+
     # Parameters
     use_sim_time = LaunchConfiguration('use_sim_time', default='false')
 
@@ -110,6 +120,7 @@ def generate_launch_description():
         # SLAM Toolbox (async mode)
         # Uses LIDAR scan matching for position, IMU (via /odom) for orientation
         # NO ENCODERS!
+        # Mode and map file are determined at launch time based on saved map existence
         Node(
             package='slam_toolbox',
             executable='async_slam_toolbox_node',
@@ -117,7 +128,18 @@ def generate_launch_description():
             output='screen',
             parameters=[
                 '/config/slam_toolbox_params.yaml',
-                {'use_sim_time': use_sim_time}
+                {
+                    'use_sim_time': use_sim_time,
+                    'mode': slam_mode,
+                    'map_file_name': saved_map_path if map_exists else '',
+                    'map_start_pose': [0.0, 0.0, 0.0]
+                }
+            ] if map_exists else [
+                '/config/slam_toolbox_params.yaml',
+                {
+                    'use_sim_time': use_sim_time,
+                    'mode': slam_mode
+                }
             ]
         ),
 

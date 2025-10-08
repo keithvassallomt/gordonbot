@@ -11,6 +11,7 @@ from tf2_ros import TransformBroadcaster
 import aiohttp
 import asyncio
 import threading
+import math
 
 
 class ImuBridge(Node):
@@ -91,10 +92,40 @@ class ImuBridge(Node):
             qy = -qy
             qz = -qz
 
-        imu.orientation.w = qw
-        imu.orientation.x = qx
-        imu.orientation.y = qy
-        imu.orientation.z = qz
+        # Remap quaternion to align sensor mounting with base_link frame
+        # Frontend orientation cube uses the same mapping:
+        # sensor(qx, qy, qz, qw) → robot(-qy, qz, -qx, qw)
+        corrected_x = -qy
+        corrected_y = qz
+        corrected_z = -qx
+        corrected_w = qw
+
+        # Normalize corrected quaternion
+        norm = math.sqrt(
+            corrected_w * corrected_w +
+            corrected_x * corrected_x +
+            corrected_y * corrected_y +
+            corrected_z * corrected_z
+        )
+        if norm == 0:
+            return
+
+        corrected_w /= norm
+        corrected_x /= norm
+        corrected_y /= norm
+        corrected_z /= norm
+
+        # Maintain convention w >= 0 to avoid sign ambiguity
+        if corrected_w < 0:
+            corrected_w = -corrected_w
+            corrected_x = -corrected_x
+            corrected_y = -corrected_y
+            corrected_z = -corrected_z
+
+        imu.orientation.w = corrected_w
+        imu.orientation.x = corrected_x
+        imu.orientation.y = corrected_y
+        imu.orientation.z = corrected_z
 
         # Angular velocity
         imu.angular_velocity.x = ang_vel.get('x', 0.0) or 0.0

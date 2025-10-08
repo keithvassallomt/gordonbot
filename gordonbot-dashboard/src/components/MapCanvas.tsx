@@ -6,6 +6,10 @@ import { useSLAM } from "@/components/hooks/useSLAM"
 import type { SlamMapMessage } from "@/components/types"
 import { API_BASE } from "@/components/config"
 
+interface MapCanvasProps {
+  showProcessed?: boolean
+}
+
 /**
  * 2D vector used for map panning offsets.
  */
@@ -30,6 +34,8 @@ const METERS_TO_PX = 100
  * via pointer drag and zooming via mouse wheel, with device‑pixel‑ratio aware
  * rendering and responsive resizing.
  *
+ * @param showProcessed - If true, displays the post-processed saved map instead of raw live map
+ *
  * @returns JSX wrapper with a canvas and on‑screen usage badges.
  *
  * @remarks
@@ -40,10 +46,10 @@ const METERS_TO_PX = 100
  *
  * @example
  * ```tsx
- * <MapCanvas />
+ * <MapCanvas showProcessed={false} />
  * ```
  */
-export default function MapCanvas() {
+export default function MapCanvas({ showProcessed = false }: MapCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const [scale, setScale] = useState(1)
@@ -59,6 +65,27 @@ export default function MapCanvas() {
   const { map, pose, status, clearMapData } = useSLAM()
   const [clearing, setClearing] = useState(false)
 
+  // Processed map image state
+  const [processedMapImage, setProcessedMapImage] = useState<HTMLImageElement | null>(null)
+  const [processedMapLoading, setProcessedMapLoading] = useState(false)
+
+  // Load processed map image when showProcessed changes to true
+  useEffect(() => {
+    if (showProcessed && !processedMapImage) {
+      setProcessedMapLoading(true)
+      const img = new Image()
+      img.onload = () => {
+        setProcessedMapImage(img)
+        setProcessedMapLoading(false)
+      }
+      img.onerror = () => {
+        console.error("Failed to load processed map image")
+        setProcessedMapLoading(false)
+      }
+      img.src = `${API_BASE}/api/slam/map/processed?t=${Date.now()}`
+    }
+  }, [showProcessed, processedMapImage])
+
   const handleClearMap = useCallback(async () => {
     if (!confirm("Clear the SLAM map? This will restart the mapping process.")) {
       return
@@ -68,6 +95,7 @@ export default function MapCanvas() {
     try {
       // Clear the local map data immediately
       clearMapData()
+      setProcessedMapImage(null) // Clear processed map image
       hasUserAdjustedRef.current = false
       setOffset({ x: 0, y: 0 })
       setScale(1)
@@ -180,14 +208,26 @@ export default function MapCanvas() {
     }
     ctx.globalAlpha = 1
 
-    // Draw SLAM map if available
-    if (map) {
+    // Draw processed map image if available and requested
+    if (showProcessed && processedMapImage) {
+      // Draw the processed map centered at origin
+      const imgWidth = processedMapImage.width
+      const imgHeight = processedMapImage.height
+      ctx.drawImage(
+        processedMapImage,
+        -imgWidth / 2,
+        -imgHeight / 2,
+        imgWidth,
+        imgHeight
+      )
+    } else if (map) {
+      // Draw live SLAM map if available
       drawSlamMap(ctx, map, toCanvasX, toCanvasY)
     }
 
     // Robot pose at origin
     ctx.save()
-    ctx.rotate(robotTheta) // Canvas positive rotation is clockwise; raw theta already accounts for that
+    ctx.rotate(robotTheta)
     ctx.fillStyle = "#10b981" // emerald-ish
     ctx.beginPath()
     ctx.moveTo(20, 0)      // front
@@ -205,7 +245,7 @@ export default function MapCanvas() {
     ctx.restore()
 
     ctx.restore()
-  }, [scale, offset, map, pose, drawSlamMap])
+  }, [scale, offset, map, pose, drawSlamMap, showProcessed, processedMapImage])
 
   useEffect(() => {
     const canvas = canvasRef.current!
@@ -316,18 +356,11 @@ export default function MapCanvas() {
           <div className={`h-2 w-2 rounded-full ${status === "connected" ? "bg-green-500" : "bg-red-500"}`} />
           SLAM {status}
         </Badge>
-      </div>
-      <div className="pointer-events-auto absolute right-2 top-2 flex gap-2">
-        <Button
-          size="sm"
-          variant="destructive"
-          onClick={handleClearMap}
-          disabled={clearing}
-          className="flex items-center gap-1"
-        >
-          <RotateCcw className={`h-4 w-4 ${clearing ? "animate-spin" : ""}`} />
-          {clearing ? "Clearing..." : "Clear Map"}
-        </Button>
+        {processedMapLoading && (
+          <Badge variant="secondary" className="flex items-center gap-1">
+            Loading processed map...
+          </Badge>
+        )}
       </div>
     </div>
   )
