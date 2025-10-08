@@ -168,6 +168,18 @@ class SlamPoseMessage(BaseModel):
     frame_id: str = Field(default="map", description="Reference frame")
 
 
+class SlamGoToPointRequest(BaseModel):
+    """Request payload for go-to-point navigation."""
+    x: float = Field(description="Target X coordinate in map frame (meters)")
+    y: float = Field(description="Target Y coordinate in map frame (meters)")
+    tolerance: float = Field(
+        default=0.1,
+        ge=0.02,
+        le=1.0,
+        description="Acceptable distance to consider the target reached (meters)",
+    )
+
+
 class LidarStatus(BaseModel):
     connected: bool
     running: bool

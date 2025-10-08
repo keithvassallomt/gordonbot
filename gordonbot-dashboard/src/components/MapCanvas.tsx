@@ -1,13 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from "react"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Move, ZoomIn, ZoomOut, RotateCcw } from "lucide-react"
+import { Crosshair, Move, ZoomIn, ZoomOut } from "lucide-react"
 import { useSLAM } from "@/components/hooks/useSLAM"
 import type { SlamMapMessage } from "@/components/types"
 import { API_BASE } from "@/components/config"
 
 interface MapCanvasProps {
   showProcessed?: boolean
+  gotoMode?: boolean
+  onSelectPoint?: (point: { x: number; y: number }) => void
 }
 
 /**
@@ -49,7 +50,7 @@ const METERS_TO_PX = 100
  * <MapCanvas showProcessed={false} />
  * ```
  */
-export default function MapCanvas({ showProcessed = false }: MapCanvasProps) {
+export default function MapCanvas({ showProcessed = false, gotoMode = false, onSelectPoint }: MapCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const [scale, setScale] = useState(1)
@@ -62,8 +63,7 @@ export default function MapCanvas({ showProcessed = false }: MapCanvasProps) {
   })
 
   // SLAM data hook
-  const { map, pose, status, clearMapData } = useSLAM()
-  const [clearing, setClearing] = useState(false)
+  const { map, pose, status } = useSLAM()
 
   // Processed map occupancy grid state
   const [processedMapData, setProcessedMapData] = useState<SlamMapMessage | null>(null)
@@ -111,39 +111,6 @@ export default function MapCanvas({ showProcessed = false }: MapCanvasProps) {
       cancelled = true
     }
   }, [showProcessed, processedMapData])
-
-  const handleClearMap = useCallback(async () => {
-    if (!confirm("Clear the SLAM map? This will restart the mapping process.")) {
-      return
-    }
-
-    setClearing(true)
-    try {
-      // Clear the local map data immediately
-      clearMapData()
-      setProcessedMapData(null) // Clear processed map cache
-      hasUserAdjustedRef.current = false
-      setOffset({ x: 0, y: 0 })
-      setScale(1)
-
-      const response = await fetch(`${API_BASE}/api/slam/clear`, {
-        method: "POST",
-      })
-
-      if (!response.ok) {
-        throw new Error(`Failed to clear map: ${response.statusText}`)
-      }
-
-      // Wait a moment for the container to restart
-      await new Promise(resolve => setTimeout(resolve, 2000))
-    } catch (error) {
-      console.error("Error clearing map:", error)
-      alert("Failed to clear map. Check console for details.")
-    } finally {
-      setClearing(false)
-    }
-  }, [clearMapData])
-
 
   /**
    * Draw the SLAM occupancy grid map.
@@ -294,6 +261,47 @@ export default function MapCanvas({ showProcessed = false }: MapCanvasProps) {
     setOffset({ x: 0, y: 0 })
   }, [map])
 
+  useEffect(() => {
+    if (!gotoMode) {
+      dragRef.current.dragging = false
+    }
+  }, [gotoMode])
+
+  const handleGoToSelection = useCallback(
+    (event: React.PointerEvent<HTMLCanvasElement>) => {
+      if (!gotoMode || !onSelectPoint) {
+        return
+      }
+      if (!pose) {
+        console.warn("Go-to selection ignored: SLAM pose unavailable")
+        return
+      }
+      const canvas = canvasRef.current
+      if (!canvas) {
+        return
+      }
+      if (event.button !== 0) {
+        return
+      }
+
+      event.preventDefault()
+      event.stopPropagation()
+
+      const rect = canvas.getBoundingClientRect()
+      const px = event.clientX - rect.left
+      const py = event.clientY - rect.top
+
+      const relX = (px - rect.width / 2 - offset.x) / scale
+      const relY = (py - rect.height / 2 - offset.y) / scale
+
+      const worldX = relX / METERS_TO_PX + pose.x
+      const worldY = -relY / METERS_TO_PX + pose.y
+
+      onSelectPoint({ x: worldX, y: worldY })
+    },
+    [gotoMode, onSelectPoint, offset.x, offset.y, pose, scale],
+  )
+
 
   /**
    * Mouse‑wheel zoom handler. Uses an exponential factor and clamps the scale.
@@ -316,7 +324,7 @@ export default function MapCanvas({ showProcessed = false }: MapCanvasProps) {
       handleWheel(event)
     }
 
-    container.addEventListener("wheel", listener, { passive: false })
+   container.addEventListener("wheel", listener, { passive: false })
     return () => {
       container.removeEventListener("wheel", listener)
     }
@@ -326,6 +334,11 @@ export default function MapCanvas({ showProcessed = false }: MapCanvasProps) {
    * Begin panning: remember the initial pointer position in screen pixels.
    */
   const onPointerDown = (e: React.PointerEvent) => {
+    if (gotoMode) {
+      handleGoToSelection(e as React.PointerEvent<HTMLCanvasElement>)
+      dragRef.current.dragging = false
+      return
+    }
     hasUserAdjustedRef.current = true
     dragRef.current = { dragging: true, x: e.clientX, y: e.clientY }
   }
@@ -333,6 +346,9 @@ export default function MapCanvas({ showProcessed = false }: MapCanvasProps) {
    * Continue panning while dragging: accumulate delta into the offset.
    */
   const onPointerMove = (e: React.PointerEvent) => {
+    if (gotoMode) {
+      return
+    }
     if (!dragRef.current.dragging) return
     const dx = e.clientX - dragRef.current.x
     const dy = e.clientY - dragRef.current.y
@@ -351,7 +367,7 @@ export default function MapCanvas({ showProcessed = false }: MapCanvasProps) {
     <div ref={containerRef} className="relative h-full w-full overflow-hidden rounded-xl border">
       <canvas
         ref={canvasRef}
-        className="h-full w-full touch-none"
+        className={`h-full w-full touch-none ${gotoMode ? "cursor-crosshair" : "cursor-grab"}`}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -371,6 +387,12 @@ export default function MapCanvas({ showProcessed = false }: MapCanvasProps) {
           <div className={`h-2 w-2 rounded-full ${status === "connected" ? "bg-green-500" : "bg-red-500"}`} />
           SLAM {status}
         </Badge>
+        {gotoMode && (
+          <Badge variant="default" className="flex items-center gap-1">
+            <Crosshair className="h-3 w-3" />
+            Click map to set destination
+          </Badge>
+        )}
         {processedMapLoading && (
           <Badge variant="secondary" className="flex items-center gap-1">
             Loading processed map...

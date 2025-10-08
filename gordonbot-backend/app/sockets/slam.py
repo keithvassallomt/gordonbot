@@ -5,10 +5,14 @@ import logging
 import json
 from typing import Optional, Set
 
+from pydantic import ValidationError
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import websockets
 
 log = logging.getLogger(__name__)
+
+from app.schemas import SlamMapMessage, SlamPoseMessage
 
 router = APIRouter()
 
@@ -18,6 +22,8 @@ clients: Set[WebSocket] = set()
 # Latest data from map_bridge
 latest_map: Optional[dict] = None
 latest_pose: Optional[dict] = None
+latest_map_obj: Optional[SlamMapMessage] = None
+latest_pose_obj: Optional[SlamPoseMessage] = None
 
 # Connection to map_bridge WebSocket
 map_bridge_ws: Optional[websockets.WebSocketClientProtocol] = None
@@ -26,7 +32,7 @@ map_bridge_task: Optional[asyncio.Task] = None
 
 async def connect_to_map_bridge():
     """Connect to ROS2 map_bridge WebSocket and relay data."""
-    global latest_map, latest_pose, map_bridge_ws
+    global latest_map, latest_pose, latest_map_obj, latest_pose_obj, map_bridge_ws
 
     map_bridge_url = "ws://localhost:9001"
 
@@ -47,11 +53,21 @@ async def connect_to_map_bridge():
 
                         if msg_type == "map":
                             latest_map = msg
+                            try:
+                                latest_map_obj = SlamMapMessage.model_validate(msg)
+                            except ValidationError as exc:
+                                log.debug("Failed to validate SLAM map message: %s", exc)
+                                latest_map_obj = None
                             # Broadcast to all connected clients
                             await broadcast_to_clients(msg)
 
                         elif msg_type == "pose":
                             latest_pose = msg
+                            try:
+                                latest_pose_obj = SlamPoseMessage.model_validate(msg)
+                            except ValidationError as exc:
+                                log.debug("Failed to validate SLAM pose message: %s", exc)
+                                latest_pose_obj = None
                             # Broadcast to all connected clients
                             await broadcast_to_clients(msg)
 
@@ -144,3 +160,17 @@ def start_map_bridge_connection():
         loop = asyncio.get_event_loop()
         map_bridge_task = loop.create_task(connect_to_map_bridge())
         log.info("Started map_bridge connection task")
+
+
+def get_latest_pose() -> Optional[SlamPoseMessage]:
+    """Return the most recent SLAM pose message, if available."""
+    if latest_pose_obj is None:
+        return None
+    return latest_pose_obj.model_copy()
+
+
+def get_latest_map() -> Optional[SlamMapMessage]:
+    """Return the most recent SLAM map message, if available."""
+    if latest_map_obj is None:
+        return None
+    return latest_map_obj.model_copy()

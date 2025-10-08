@@ -9,13 +9,16 @@ DO NOT modify manual control code - use this module for autonomous features.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import math
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
+from app.core.config import settings
 from app.services.sensors import get_sensor_status
+from app.sockets import slam as slam_socket
 
 if TYPE_CHECKING:
     from fastapi import WebSocket
@@ -38,6 +41,11 @@ KEY_TURN_ACCEL_PER_S = 1.2
 KEY_TURN_DECEL_PER_S = 2.0
 _TICK_INTERVAL = 1.0 / COMMAND_HZ
 _SENSOR_INTERVAL = 0.12  # 120ms, matches sandbox sleep(120)
+
+_TOF_STOP_DISTANCE_MM = max(30, int(settings.tof_alert_threshold_mm) + 10)
+_GO_TO_MAX_DURATION_S = 120.0
+_GO_TO_STALL_TIMEOUT_S = 6.0
+_GO_TO_POSE_TIMEOUT_S = 1.0
 
 
 def set_motors(left: float, right: float) -> None:
@@ -134,6 +142,11 @@ def _normalize_heading(deg: float) -> float:
 def _normalize_angle_diff(deg: float) -> float:
     """Normalize angle difference to -180 to 180 range."""
     return ((deg + 180) % 360 + 360) % 360 - 180
+
+
+def _normalize_angle_rad(angle: float) -> float:
+    """Normalize angle to the range [-pi, pi]."""
+    return math.atan2(math.sin(angle), math.cos(angle))
 
 
 def _clamp(value: float, min_val: float = -1.0, max_val: float = 1.0) -> float:
@@ -356,3 +369,445 @@ async def drive_figure_eight(ws: WebSocket, stop_event: asyncio.Event) -> bool:
         return False
     finally:
         stop_motors()
+
+
+# --- Go-to point navigation ----------------------------------------------------
+
+
+@dataclass
+class GoToResult:
+    success: bool
+    reason: str
+    distance_remaining: Optional[float]
+    elapsed_s: float
+    tof_distance_mm: Optional[int] = None
+    completed_at: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "success": self.success,
+            "reason": self.reason,
+            "distance_remaining": self.distance_remaining,
+            "elapsed_s": self.elapsed_s,
+            "tof_distance_mm": self.tof_distance_mm,
+            "completed_at": self.completed_at,
+        }
+
+
+@dataclass
+class GoToStatus:
+    state: str
+    target: Optional[tuple[float, float]] = None
+    tolerance: Optional[float] = None
+    distance_remaining: Optional[float] = None
+    initial_distance: Optional[float] = None
+    started_at: Optional[float] = None
+    elapsed_s: Optional[float] = None
+    success: Optional[bool] = None
+    reason: Optional[str] = None
+    tof_distance_mm: Optional[int] = None
+    finished_at: Optional[float] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "state": self.state,
+            "tolerance": self.tolerance,
+            "distance_remaining": self.distance_remaining,
+            "initial_distance": self.initial_distance,
+            "started_at": self.started_at,
+            "elapsed_s": self.elapsed_s,
+            "success": self.success,
+            "reason": self.reason,
+            "tof_distance_mm": self.tof_distance_mm,
+            "finished_at": self.finished_at,
+        }
+        payload["target"] = {"x": self.target[0], "y": self.target[1]} if self.target else None
+        return {k: v for k, v in payload.items() if v is not None or k in {"state", "target"}}
+
+
+@dataclass
+class _GoToContext:
+    target_x: float
+    target_y: float
+    tolerance: float
+    initial_distance: float
+    started_at_wall: float
+    started_at_monotonic: float
+    stop_event: asyncio.Event
+    task: asyncio.Task[GoToResult]
+
+
+@dataclass
+class _GoToHistory:
+    result: GoToResult
+    target_x: float
+    target_y: float
+    tolerance: float
+    initial_distance: float
+    started_at_wall: float
+    started_at_monotonic: float
+
+
+class GoToError(Exception):
+    """Base class for go-to navigation errors."""
+
+
+class GoToValidationError(GoToError):
+    """Raised when the requested go-to target is invalid."""
+
+
+class GoToInProgressError(GoToError):
+    """Raised when a go-to command is already running."""
+
+
+class GoToNotRunningError(GoToError):
+    """Raised when attempting to cancel a go-to command that is not active."""
+
+
+_GO_TO_LOCK = asyncio.Lock()
+_GO_TO_CONTEXT: Optional[_GoToContext] = None
+_GO_TO_LAST: Optional[_GoToHistory] = None
+
+
+def _lookup_map_cell(map_msg: "SlamMapMessage", x: float, y: float) -> Optional[int]:
+    """Return occupancy value for world coordinate, or None if outside map."""
+    dx = (x - map_msg.origin.x) / map_msg.resolution
+    dy = (y - map_msg.origin.y) / map_msg.resolution
+    col = int(math.floor(dx))
+    row = int(math.floor(dy))
+    if col < 0 or col >= map_msg.width or row < 0 or row >= map_msg.height:
+        return None
+    idx = row * map_msg.width + col
+    if idx < 0 or idx >= len(map_msg.data):
+        return None
+    try:
+        return int(map_msg.data[idx])
+    except (ValueError, TypeError):
+        return None
+
+
+async def drive_to_point(
+    target_x: float,
+    target_y: float,
+    stop_event: asyncio.Event,
+    *,
+    tolerance: float = 0.1,
+    max_duration_s: float = _GO_TO_MAX_DURATION_S,
+) -> GoToResult:
+    """
+    Drive the robot toward a target point in the SLAM map frame.
+
+    Uses SLAM pose feedback and ToF safety stop. Returns the drive outcome.
+    """
+    log.info(
+        "Go-to-point routine start target=(%.3f, %.3f)m tolerance=%.3f m",
+        target_x,
+        target_y,
+        tolerance,
+    )
+    drive_start_monotonic = time.monotonic()
+    best_distance = float("inf")
+    progress_reset = drive_start_monotonic
+    pose_last_seen = drive_start_monotonic
+    tof_trigger_mm: Optional[int] = None
+    final_distance: Optional[float] = None
+    result: Optional[GoToResult] = None
+    reason = "unknown"
+    success = False
+
+    # Reset controller for smooth start
+    _drive_controller.reset()
+    sensor_elapsed = _SENSOR_INTERVAL
+
+    try:
+        while True:
+            if stop_event.is_set():
+                reason = "cancelled"
+                break
+
+            pose = slam_socket.get_latest_pose()
+            now = time.monotonic()
+
+            if pose is not None:
+                pose_last_seen = now
+                dx = target_x - float(pose.x)
+                dy = target_y - float(pose.y)
+                distance = math.hypot(dx, dy)
+                final_distance = distance
+
+                if distance <= tolerance:
+                    success = True
+                    reason = "reached"
+                    _drive_controller.set_target(0.0, 0.0)
+                    break
+
+                heading_error = _normalize_angle_rad(math.atan2(dy, dx) - float(pose.theta))
+
+                forward_target = _clamp(distance * 1.1, 0.0, 0.8)
+                turn_target = _clamp(heading_error * 2.2, -0.8, 0.8)
+
+                heading_abs = abs(heading_error)
+                if heading_abs > math.radians(60):
+                    forward_target = 0.0
+                elif heading_abs > math.radians(35):
+                    forward_target = min(forward_target, 0.25)
+                elif distance < 0.35:
+                    forward_target = min(forward_target, 0.35)
+
+                if distance < max(tolerance * 2.0, 0.15):
+                    forward_target = min(forward_target, 0.2)
+
+                _drive_controller.set_target(turn_target, forward_target)
+
+                if distance + 1e-3 < best_distance:
+                    best_distance = distance
+                    progress_reset = now
+            else:
+                _drive_controller.set_target(0.0, 0.0)
+
+            _drive_controller.step()
+            await asyncio.sleep(_TICK_INTERVAL)
+
+            sensor_elapsed += _TICK_INTERVAL
+            if sensor_elapsed + 1e-9 >= _SENSOR_INTERVAL:
+                sensor_elapsed = 0.0
+                sensors = get_sensor_status()
+                tof_mm = None
+                if sensors.tof and sensors.tof.distance_mm is not None:
+                    tof_mm = int(sensors.tof.distance_mm)
+                if tof_mm is not None and tof_mm <= _TOF_STOP_DISTANCE_MM:
+                    tof_trigger_mm = tof_mm
+                    reason = "tof_stop"
+                    break
+
+            now = time.monotonic()
+            if now - pose_last_seen > _GO_TO_POSE_TIMEOUT_S:
+                reason = "pose_unavailable"
+                break
+
+            if now - progress_reset > _GO_TO_STALL_TIMEOUT_S:
+                reason = "stalled"
+                break
+
+            if now - drive_start_monotonic > max_duration_s:
+                reason = "timeout"
+                break
+
+        stop_monotonic = time.monotonic()
+        stop_wall = time.time()
+        result = GoToResult(
+            success=success,
+            reason=reason,
+            distance_remaining=final_distance,
+            elapsed_s=stop_monotonic - drive_start_monotonic,
+            tof_distance_mm=tof_trigger_mm,
+            completed_at=stop_wall,
+        )
+
+        if success:
+            log.info(
+                "Go-to-point reached target distance=%.3f m elapsed=%.1f s",
+                final_distance if final_distance is not None else 0.0,
+                result.elapsed_s,
+            )
+        else:
+            log.warning(
+                "Go-to-point stopped reason=%s distance=%s elapsed=%.1f s",
+                reason,
+                f"{final_distance:.3f} m" if final_distance is not None else "unknown",
+                result.elapsed_s,
+            )
+    except Exception as exc:
+        stop_monotonic = time.monotonic()
+        stop_wall = time.time()
+        log.exception("Go-to-point routine failed: %s", exc)
+        result = GoToResult(
+            success=False,
+            reason="exception",
+            distance_remaining=final_distance,
+            elapsed_s=stop_monotonic - drive_start_monotonic,
+            tof_distance_mm=tof_trigger_mm,
+            completed_at=stop_wall,
+        )
+    finally:
+        _drive_controller.set_target(0.0, 0.0)
+        for _ in range(4):
+            _drive_controller.step()
+            await asyncio.sleep(_TICK_INTERVAL)
+        stop_motors()
+
+    return result
+
+
+async def start_go_to_point(
+    target_x: float,
+    target_y: float,
+    *,
+    tolerance: float = 0.1,
+) -> GoToStatus:
+    """
+    Start an asynchronous go-to routine toward the requested SLAM coordinate.
+    """
+    map_msg = slam_socket.get_latest_map()
+    pose = slam_socket.get_latest_pose()
+
+    if map_msg is None:
+        raise GoToValidationError("SLAM map not available")
+    if pose is None:
+        raise GoToValidationError("SLAM pose not available")
+
+    occupancy = _lookup_map_cell(map_msg, target_x, target_y)
+    if occupancy is None:
+        raise GoToValidationError("Target lies outside the known map bounds")
+    if occupancy == -1:
+        raise GoToValidationError("Target cell is unknown space")
+    if occupancy >= 65:
+        raise GoToValidationError("Target cell is occupied")
+
+    initial_distance = math.hypot(target_x - float(pose.x), target_y - float(pose.y))
+    if initial_distance <= tolerance:
+        raise GoToValidationError("Already within tolerance of the requested point")
+
+    async with _GO_TO_LOCK:
+        global _GO_TO_CONTEXT
+        if _GO_TO_CONTEXT is not None and not _GO_TO_CONTEXT.task.done():
+            raise GoToInProgressError("A go-to routine is already running")
+
+        stop_event = asyncio.Event()
+        started_wall = time.time()
+        started_monotonic = time.monotonic()
+
+        async def _runner() -> GoToResult:
+            return await drive_to_point(target_x, target_y, stop_event, tolerance=tolerance)
+
+        task = asyncio.create_task(_runner(), name="go-to-point")
+        context = _GoToContext(
+            target_x=target_x,
+            target_y=target_y,
+            tolerance=tolerance,
+            initial_distance=initial_distance,
+            started_at_wall=started_wall,
+            started_at_monotonic=started_monotonic,
+            stop_event=stop_event,
+            task=task,
+        )
+
+        _GO_TO_CONTEXT = context
+
+        def _store_result(fut: asyncio.Task[GoToResult]) -> None:
+            global _GO_TO_CONTEXT, _GO_TO_LAST
+
+            try:
+                res = fut.result()
+            except Exception as exc:  # pragma: no cover - defensive
+                log.exception("Go-to-point task crashed: %s", exc)
+                stop_monotonic = time.monotonic()
+                stop_wall = time.time()
+                res = GoToResult(
+                    success=False,
+                    reason="exception",
+                    distance_remaining=None,
+                    elapsed_s=stop_monotonic - context.started_at_monotonic,
+                    tof_distance_mm=None,
+                    completed_at=stop_wall,
+                )
+
+            _GO_TO_LAST = _GoToHistory(
+                result=res,
+                target_x=context.target_x,
+                target_y=context.target_y,
+                tolerance=context.tolerance,
+                initial_distance=context.initial_distance,
+                started_at_wall=context.started_at_wall,
+                started_at_monotonic=context.started_at_monotonic,
+            )
+            _GO_TO_CONTEXT = None
+
+        task.add_done_callback(_store_result)
+
+    log.info(
+        "Go-to-point task launched target=(%.3f, %.3f)m tolerance=%.3f m start_distance=%.3f m",
+        target_x,
+        target_y,
+        tolerance,
+        initial_distance,
+    )
+
+    return GoToStatus(
+        state="running",
+        target=(target_x, target_y),
+        tolerance=tolerance,
+        distance_remaining=initial_distance,
+        initial_distance=initial_distance,
+        started_at=started_wall,
+        elapsed_s=0.0,
+    )
+
+
+async def cancel_go_to_point(*, wait: bool = True, timeout: float = 3.0) -> bool:
+    """
+    Cancel an active go-to routine. Returns True if a cancellation was issued.
+    """
+    task: Optional[asyncio.Task[GoToResult]] = None
+
+    async with _GO_TO_LOCK:
+        context = _GO_TO_CONTEXT
+        if context is None or context.task.done():
+            raise GoToNotRunningError("No go-to routine is currently running")
+
+        context.stop_event.set()
+        task = context.task
+
+    if wait and task is not None:
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(task, timeout=timeout)
+
+    return True
+
+
+async def get_go_to_status() -> GoToStatus:
+    """
+    Return the current go-to routine status or the result of the last run.
+    """
+    async with _GO_TO_LOCK:
+        context = _GO_TO_CONTEXT
+        history = _GO_TO_LAST
+
+    pose = slam_socket.get_latest_pose()
+    now_monotonic = time.monotonic()
+
+    if context is not None and not context.task.done():
+        distance_remaining = None
+        if pose is not None:
+            distance_remaining = math.hypot(
+                context.target_x - float(pose.x),
+                context.target_y - float(pose.y),
+            )
+        elapsed = now_monotonic - context.started_at_monotonic
+        return GoToStatus(
+            state="running",
+            target=(context.target_x, context.target_y),
+            tolerance=context.tolerance,
+            distance_remaining=distance_remaining,
+            initial_distance=context.initial_distance,
+            started_at=context.started_at_wall,
+            elapsed_s=elapsed,
+        )
+
+    if history is not None:
+        result = history.result
+        return GoToStatus(
+            state="idle",
+            target=(history.target_x, history.target_y),
+            tolerance=history.tolerance,
+            distance_remaining=result.distance_remaining,
+            initial_distance=history.initial_distance,
+            started_at=history.started_at_wall,
+            elapsed_s=result.elapsed_s,
+            success=result.success,
+            reason=result.reason,
+            tof_distance_mm=result.tof_distance_mm,
+            finished_at=result.completed_at,
+        )
+
+    return GoToStatus(state="idle")

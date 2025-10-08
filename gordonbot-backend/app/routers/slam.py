@@ -6,9 +6,18 @@ from pathlib import Path
 from io import BytesIO
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from PIL import Image
 
+from app.schemas import SlamGoToPointRequest
+from app.services.autonomous_drive import (
+    GoToInProgressError,
+    GoToNotRunningError,
+    GoToValidationError,
+    cancel_go_to_point,
+    get_go_to_status,
+    start_go_to_point,
+)
 from app.services.map_processor import default_processor
 
 log = logging.getLogger(__name__)
@@ -322,3 +331,49 @@ async def get_processed_map_grid():
             status_code=500,
             detail=f"Error retrieving processed map grid: {str(e)}"
         )
+
+
+@router.post("/slam/goto", tags=["slam"])
+async def go_to_point(request: SlamGoToPointRequest):
+    """Start autonomous navigation toward a target SLAM coordinate."""
+    try:
+        status = await start_go_to_point(
+            request.x,
+            request.y,
+            tolerance=request.tolerance,
+        )
+    except GoToValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except GoToInProgressError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:  # pragma: no cover - defensive
+        log.exception("Failed to start go-to routine: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to start go-to routine") from exc
+
+    payload = status.to_dict()
+    payload["message"] = "Go-to routine started"
+    return payload
+
+
+@router.get("/slam/goto/status", tags=["slam"])
+async def go_to_status():
+    """Return current go-to status or the result of the last run."""
+    status = await get_go_to_status()
+    return status.to_dict()
+
+
+@router.post("/slam/goto/cancel", tags=["slam"])
+async def cancel_go_to():
+    """Request cancellation of the active go-to routine."""
+    try:
+        await cancel_go_to_point()
+    except GoToNotRunningError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:  # pragma: no cover - defensive
+        log.exception("Failed to cancel go-to routine: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to cancel go-to routine") from exc
+
+    status = await get_go_to_status()
+    payload = status.to_dict()
+    payload["message"] = "Go-to routine cancelled"
+    return payload
