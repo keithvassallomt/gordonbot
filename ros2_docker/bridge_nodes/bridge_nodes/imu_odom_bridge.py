@@ -10,6 +10,7 @@ from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Imu
 from geometry_msgs.msg import TransformStamped
 from tf2_ros import TransformBroadcaster
+import math
 
 
 class ImuOdomBridge(Node):
@@ -68,8 +69,17 @@ class ImuOdomBridge(Node):
         odom.pose.pose.position.y = 0.0
         odom.pose.pose.position.z = 0.0
 
-        # Orientation: directly from IMU (already normalized in imu_bridge)
-        odom.pose.pose.orientation = self.latest_imu.orientation
+        rotated = self._rotate_quaternion_z(
+            self.latest_imu.orientation.x,
+            self.latest_imu.orientation.y,
+            self.latest_imu.orientation.z,
+            self.latest_imu.orientation.w,
+            math.pi,
+        )
+        odom.pose.pose.orientation.x = rotated[0]
+        odom.pose.pose.orientation.y = rotated[1]
+        odom.pose.pose.orientation.z = rotated[2]
+        odom.pose.pose.orientation.w = rotated[3]
 
         # Velocity: angular velocity from IMU, no linear velocity
         odom.twist.twist.linear.x = 0.0
@@ -93,9 +103,30 @@ class ImuOdomBridge(Node):
         t.transform.translation.x = 0.0
         t.transform.translation.y = 0.0
         t.transform.translation.z = 0.0
-        t.transform.rotation = self.latest_imu.orientation
+        t.transform.rotation.x = rotated[0]
+        t.transform.rotation.y = rotated[1]
+        t.transform.rotation.z = rotated[2]
+        t.transform.rotation.w = rotated[3]
 
         self.tf_broadcaster.sendTransform(t)
+
+    @staticmethod
+    def _rotate_quaternion_z(qx: float, qy: float, qz: float, qw: float, angle_rad: float):
+        half = angle_rad / 2.0
+        rz_x = 0.0
+        rz_y = 0.0
+        rz_z = math.sin(half)
+        rz_w = math.cos(half)
+
+        out_x = rz_w * qx + rz_x * qw + rz_y * qz - rz_z * qy
+        out_y = rz_w * qy - rz_x * qz + rz_y * qw + rz_z * qx
+        out_z = rz_w * qz + rz_x * qy - rz_y * qx + rz_z * qw
+        out_w = rz_w * qw - rz_x * qx - rz_y * qy - rz_z * qz
+
+        norm = math.sqrt(out_x * out_x + out_y * out_y + out_z * out_z + out_w * out_w)
+        if norm == 0.0:
+            return qx, qy, qz, qw
+        return out_x / norm, out_y / norm, out_z / norm, out_w / norm
 
 
 def main(args=None):

@@ -3,125 +3,32 @@ import { Badge } from "@/components/ui/badge"
 import { Crosshair, Move, ZoomIn, ZoomOut } from "lucide-react"
 import { useSLAM } from "@/components/hooks/useSLAM"
 import type { SlamMapMessage } from "@/components/types"
-import { API_BASE } from "@/components/config"
 
 interface MapCanvasProps {
-  showProcessed?: boolean
   gotoMode?: boolean
   onSelectPoint?: (point: { x: number; y: number }) => void
 }
 
-/**
- * 2D vector used for map panning offsets.
- */
 type Vec2 = { x: number; y: number }
-/**
- * Clamp a numeric value to the provided range.
- * @param n - Number to clamp.
- * @param min - Minimum value (default -1).
- * @param max - Maximum value (default 1).
- * @returns The clamped number.
- */
+
+const METERS_TO_PX = 100
+
 function clamp(n: number, min = -1, max = 1) {
   return Math.max(min, Math.min(max, n))
 }
 
-const METERS_TO_PX = 100
-
-/**
- * Map canvas placeholder with pan & zoom.
- *
- * Renders a grid and a simple robot pose marker. Supports smooth panning
- * via pointer drag and zooming via mouse wheel, with device‑pixel‑ratio aware
- * rendering and responsive resizing.
- *
- * @param showProcessed - If true, displays the post-processed saved map instead of raw live map
- *
- * @returns JSX wrapper with a canvas and on‑screen usage badges.
- *
- * @remarks
- * - Wheel zoom is exponential for smoothness and clamped to [0.25, 4].
- * - Panning updates an (x,y) offset in CSS pixels.
- * - Resizes to its parent and scales for high‑DPI displays.
- * - Replace the placeholder draw routine with your SLAM/occupancy map later.
- *
- * @example
- * ```tsx
- * <MapCanvas showProcessed={false} />
- * ```
- */
-export default function MapCanvas({ showProcessed = false, gotoMode = false, onSelectPoint }: MapCanvasProps) {
+export default function MapCanvas({ gotoMode = false, onSelectPoint }: MapCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const [scale, setScale] = useState(1)
   const [offset, setOffset] = useState<Vec2>({ x: 0, y: 0 })
   const hasUserAdjustedRef = useRef(false)
-  const dragRef = useRef<{ dragging: boolean; x: number; y: number }>({
-    dragging: false,
-    x: 0,
-    y: 0,
-  })
+  const dragRef = useRef<{ dragging: boolean; x: number; y: number }>({ dragging: false, x: 0, y: 0 })
 
-  // SLAM data hook
   const { map, pose, status } = useSLAM()
 
-  // Processed map occupancy grid state
-  const [processedMapData, setProcessedMapData] = useState<SlamMapMessage | null>(null)
-  const [processedMapLoading, setProcessedMapLoading] = useState(false)
-
-  // Load processed map grid when requested
-  useEffect(() => {
-    if (!showProcessed) {
-      return
-    }
-
-    let cancelled = false
-
-    const loadProcessedMap = async () => {
-      setProcessedMapLoading(true)
-      try {
-        const response = await fetch(`${API_BASE}/api/slam/map/processed-grid?t=${Date.now()}`)
-        if (!response.ok) {
-          throw new Error(`Failed to load processed map: ${response.statusText}`)
-        }
-        const data = await response.json()
-        if (!cancelled) {
-          setProcessedMapData(data as SlamMapMessage)
-        }
-      } catch (error) {
-        console.error("Failed to load processed map grid:", error)
-        if (!cancelled) {
-          setProcessedMapData(null)
-        }
-      } finally {
-        if (!cancelled) {
-          setProcessedMapLoading(false)
-        }
-      }
-    }
-
-    // Avoid refetching if we already have data
-    if (!processedMapData) {
-      loadProcessedMap()
-    } else {
-      setProcessedMapLoading(false)
-    }
-
-    return () => {
-      cancelled = true
-    }
-  }, [showProcessed, processedMapData])
-
-  /**
-   * Draw the SLAM occupancy grid map.
-   */
   const drawSlamMap = useCallback(
-    (
-      ctx: CanvasRenderingContext2D,
-      mapData: SlamMapMessage,
-      toCanvasX: (x: number) => number,
-      toCanvasY: (y: number) => number,
-    ) => {
+    (ctx: CanvasRenderingContext2D, mapData: SlamMapMessage, toCanvasX: (x: number) => number, toCanvasY: (y: number) => number) => {
       const { width, height, resolution, origin, data } = mapData
       const cellSize = resolution * METERS_TO_PX
       const half = cellSize / 2
@@ -153,10 +60,6 @@ export default function MapCanvas({ showProcessed = false, gotoMode = false, onS
     [],
   )
 
-  /**
-   * Draw the current frame: grid, SLAM map, and robot pose.
-   * Applies current pan (offset) and zoom (scale) while keeping the robot centred.
-   */
   const draw = useCallback(() => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -181,10 +84,8 @@ export default function MapCanvas({ showProcessed = false, gotoMode = false, onS
     ctx.translate(width / 2 + offset.x, height / 2 + offset.y)
     ctx.scale(scale, scale)
 
-    // Grid
-    const grid = 100 // px per meter at scale 1
-    ctx.strokeStyle =
-      getComputedStyle(document.documentElement).getPropertyValue("--muted-foreground") || "#ccc"
+    const grid = 100
+    ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue("--muted-foreground") || "#ccc"
     ctx.globalAlpha = 0.2
     ctx.lineWidth = 1 / scale
     for (let x = -2000; x <= 2000; x += grid) {
@@ -201,23 +102,19 @@ export default function MapCanvas({ showProcessed = false, gotoMode = false, onS
     }
     ctx.globalAlpha = 1
 
-    const mapToDraw = showProcessed && processedMapData ? processedMapData : map
-
-    if (mapToDraw) {
-      drawSlamMap(ctx, mapToDraw, toCanvasX, toCanvasY)
+    if (map) {
+      drawSlamMap(ctx, map, toCanvasX, toCanvasY)
     }
 
-    // Robot pose at origin
     ctx.save()
     ctx.rotate(robotTheta)
-    ctx.fillStyle = "#10b981" // emerald-ish
+    ctx.fillStyle = "#10b981"
     ctx.beginPath()
-    ctx.moveTo(20, 0)      // front
-    ctx.lineTo(-10, 12)    // back left
-    ctx.lineTo(-10, -12)   // back right
+    ctx.moveTo(20, 0)
+    ctx.lineTo(-10, 12)
+    ctx.lineTo(-10, -12)
     ctx.closePath()
     ctx.fill()
-
     ctx.strokeStyle = "#10b981"
     ctx.lineWidth = 3 / scale
     ctx.beginPath()
@@ -227,7 +124,7 @@ export default function MapCanvas({ showProcessed = false, gotoMode = false, onS
     ctx.restore()
 
     ctx.restore()
-  }, [scale, offset, map, pose, drawSlamMap, showProcessed, processedMapData])
+  }, [scale, offset, map, pose, drawSlamMap])
 
   useEffect(() => {
     const canvas = canvasRef.current!
@@ -261,11 +158,28 @@ export default function MapCanvas({ showProcessed = false, gotoMode = false, onS
     setOffset({ x: 0, y: 0 })
   }, [map])
 
+  const handleWheel = useCallback((event: WheelEvent) => {
+    const delta = -event.deltaY
+    const factor = Math.exp(delta * 0.001)
+    hasUserAdjustedRef.current = true
+    setScale((s) => clamp(s * factor, 0.25, 4))
+  }, [])
+
   useEffect(() => {
-    if (!gotoMode) {
-      dragRef.current.dragging = false
+    const container = containerRef.current
+    if (!container) return
+
+    const listener = (event: WheelEvent) => {
+      event.preventDefault()
+      event.stopPropagation()
+      handleWheel(event)
     }
-  }, [gotoMode])
+
+    container.addEventListener("wheel", listener, { passive: false })
+    return () => {
+      container.removeEventListener("wheel", listener)
+    }
+  }, [handleWheel])
 
   const handleGoToSelection = useCallback(
     (event: React.PointerEvent<HTMLCanvasElement>) => {
@@ -302,37 +216,6 @@ export default function MapCanvas({ showProcessed = false, gotoMode = false, onS
     [gotoMode, onSelectPoint, offset.x, offset.y, pose, scale],
   )
 
-
-  /**
-   * Mouse‑wheel zoom handler. Uses an exponential factor and clamps the scale.
-   * Bound via a non-passive listener so the page does not scroll.
-   */
-  const handleWheel = useCallback((event: WheelEvent) => {
-    const delta = -event.deltaY
-    const factor = Math.exp(delta * 0.001)
-    hasUserAdjustedRef.current = true
-    setScale((s) => clamp(s * factor, 0.25, 4))
-  }, [])
-
-  useEffect(() => {
-    const container = containerRef.current
-    if (!container) return
-
-    const listener = (event: WheelEvent) => {
-      event.preventDefault()
-      event.stopPropagation()
-      handleWheel(event)
-    }
-
-   container.addEventListener("wheel", listener, { passive: false })
-    return () => {
-      container.removeEventListener("wheel", listener)
-    }
-  }, [handleWheel])
-
-  /**
-   * Begin panning: remember the initial pointer position in screen pixels.
-   */
   const onPointerDown = (e: React.PointerEvent) => {
     if (gotoMode) {
       handleGoToSelection(e as React.PointerEvent<HTMLCanvasElement>)
@@ -342,9 +225,7 @@ export default function MapCanvas({ showProcessed = false, gotoMode = false, onS
     hasUserAdjustedRef.current = true
     dragRef.current = { dragging: true, x: e.clientX, y: e.clientY }
   }
-  /**
-   * Continue panning while dragging: accumulate delta into the offset.
-   */
+
   const onPointerMove = (e: React.PointerEvent) => {
     if (gotoMode) {
       return
@@ -356,9 +237,7 @@ export default function MapCanvas({ showProcessed = false, gotoMode = false, onS
     dragRef.current.y = e.clientY
     setOffset((o) => ({ x: o.x + dx, y: o.y + dy }))
   }
-  /**
-   * End panning.
-   */
+
   const onPointerUp = () => {
     dragRef.current.dragging = false
   }
@@ -390,12 +269,7 @@ export default function MapCanvas({ showProcessed = false, gotoMode = false, onS
         {gotoMode && (
           <Badge variant="default" className="flex items-center gap-1">
             <Crosshair className="h-3 w-3" />
-            Click map to set destination
-          </Badge>
-        )}
-        {processedMapLoading && (
-          <Badge variant="secondary" className="flex items-center gap-1">
-            Loading processed map...
+            Click to target
           </Badge>
         )}
       </div>

@@ -12,6 +12,7 @@ import aiohttp
 import asyncio
 import threading
 import math
+from typing import Tuple
 
 
 class ImuBridge(Node):
@@ -122,10 +123,12 @@ class ImuBridge(Node):
             corrected_y = -corrected_y
             corrected_z = -corrected_z
 
-        imu.orientation.w = corrected_w
-        imu.orientation.x = corrected_x
-        imu.orientation.y = corrected_y
-        imu.orientation.z = corrected_z
+        rotated_x, rotated_y, rotated_z, rotated_w = self._rotate_quaternion_z(corrected_x, corrected_y, corrected_z, corrected_w, math.pi)
+
+        imu.orientation.w = rotated_w
+        imu.orientation.x = rotated_x
+        imu.orientation.y = rotated_y
+        imu.orientation.z = rotated_z
 
         # Angular velocity
         imu.angular_velocity.x = ang_vel.get('x', 0.0) or 0.0
@@ -161,6 +164,36 @@ class ImuBridge(Node):
         t.transform.translation.z = 0.05  # 5cm above base_link
         t.transform.rotation.w = 1.0
         self.tf_broadcaster.sendTransform(t)
+
+    @staticmethod
+    def _rotate_quaternion_z(
+        qx: float,
+        qy: float,
+        qz: float,
+        qw: float,
+        angle_rad: float,
+    ) -> Tuple[float, float, float, float]:
+        """Rotate quaternion about Z axis by angle."""
+        half = angle_rad / 2.0
+        rz_x = 0.0
+        rz_y = 0.0
+        rz_z = math.sin(half)
+        rz_w = math.cos(half)
+
+        # Quaternion multiplication: q_rot * q
+        out_x = rz_w * qx + rz_x * qw + rz_y * qz - rz_z * qy
+        out_y = rz_w * qy - rz_x * qz + rz_y * qw + rz_z * qx
+        out_z = rz_w * qz + rz_x * qy - rz_y * qx + rz_z * qw
+        out_w = rz_w * qw - rz_x * qx - rz_y * qy - rz_z * qz
+
+        norm = math.sqrt(out_x * out_x + out_y * out_y + out_z * out_z + out_w * out_w)
+        if norm == 0.0:
+            return qx, qy, qz, qw
+        out_x /= norm
+        out_y /= norm
+        out_z /= norm
+        out_w /= norm
+        return out_x, out_y, out_z, out_w
 
 
 def main(args=None):

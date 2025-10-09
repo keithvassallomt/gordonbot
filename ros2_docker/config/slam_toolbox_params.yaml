@@ -53,6 +53,9 @@ slam_toolbox:
 
     # Async mode (online SLAM)
     max_laser_range: 12.0  # RPLIDAR C1 max range
+    minimum_laser_range: 0.2  # Match RPLIDAR minimum range
+    min_laser_range: 0.2      # Alias for slam_toolbox versions using min_laser_range
+    minimum_distance_to_read: 0.2
     minimum_time_interval: 0.1  # 10Hz update rate
     transform_publish_period: 0.05  # 20Hz TF publishing
 

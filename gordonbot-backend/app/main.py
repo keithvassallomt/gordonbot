@@ -304,6 +304,4 @@ async def _stop_streaming() -> None:
     set_lidar_service(None)
     stop_tof_alert_monitor()
     stop_bno055_poller()
-
-
-# Root-level WHEP proxy removed; use router-mounted endpoint under /api
+    # Root-level WHEP proxy removed; use router-mounted endpoint under /api

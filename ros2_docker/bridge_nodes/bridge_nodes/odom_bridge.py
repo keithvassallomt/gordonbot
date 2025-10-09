@@ -66,7 +66,7 @@ class OdomBridge(Node):
                     async with session.get(f"{self.backend_url}/api/sensors") as resp:
                         if resp.status == 200:
                             data = await resp.json()
-                            self._update_odometry(data.get('encoders', {}))
+                            self._update_odometry(data)
 
                     await asyncio.sleep(1.0 / self.poll_rate)
 
@@ -74,10 +74,12 @@ class OdomBridge(Node):
                     self.get_logger().warn(f'Encoder polling error: {e}')
                     await asyncio.sleep(1.0)
 
-    def _update_odometry(self, encoders):
+    def _update_odometry(self, sensor_data):
         """Update odometry from encoder data."""
-        left = encoders.get('left', {})
-        right = encoders.get('right', {})
+        encoders = sensor_data.get('encoders', {}) if isinstance(sensor_data, dict) else {}
+        left = encoders.get('left', {}) if isinstance(encoders, dict) else {}
+        right = encoders.get('right', {}) if isinstance(encoders, dict) else {}
+        imu = sensor_data.get('bno055') if isinstance(sensor_data, dict) else None
 
         left_dist = left.get('distance_m')
         right_dist = right.get('distance_m')
@@ -103,15 +105,19 @@ class OdomBridge(Node):
         # Calculate distance traveled (average of both wheels)
         delta_dist = (delta_left + delta_right) / 2.0
 
-        # NOTE: We do NOT calculate theta from encoders - it's garbage!
-        # Orientation comes from IMU via EKF instead.
-        # delta_theta = (delta_right - delta_left) / self.wheel_base  # REMOVED
+        # Update orientation from IMU yaw when available (degrees → radians)
+        imu_yaw_deg = None
+        if isinstance(imu, dict):
+            euler = imu.get('euler') if isinstance(imu.get('euler'), dict) else None
+            if euler and euler.get('yaw') is not None:
+                imu_yaw_deg = float(euler['yaw'])
+        if imu_yaw_deg is not None and math.isfinite(imu_yaw_deg):
+            theta_raw = math.radians(imu_yaw_deg)
+            self.theta = math.atan2(math.sin(theta_raw), math.cos(theta_raw))
 
-        # Update position only (orientation comes from EKF/IMU)
-        # Use current theta from EKF for position update
+        # Update position using latest heading
         self.x += delta_dist * math.cos(self.theta)
         self.y += delta_dist * math.sin(self.theta)
-        # self.theta += delta_theta  # REMOVED - no encoder-based orientation!
 
         # Publish odometry
         self._publish_odometry()
@@ -178,3 +184,5 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
+        def _normalize_angle(angle_rad: float) -> float:
+            return math.atan2(math.sin(angle_rad), math.cos(angle_rad))

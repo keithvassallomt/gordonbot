@@ -13,7 +13,6 @@ import websockets
 log = logging.getLogger(__name__)
 
 from app.schemas import SlamMapMessage, SlamPoseMessage
-
 router = APIRouter()
 
 # Store connected clients
