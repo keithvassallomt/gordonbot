@@ -107,7 +107,7 @@ export default function MapCanvas({ gotoMode = false, onSelectPoint }: MapCanvas
     }
 
     ctx.save()
-    ctx.rotate(robotTheta)
+    ctx.rotate(-robotTheta)  // Negate to match inverted Y-axis
     ctx.fillStyle = "#10b981"
     ctx.beginPath()
     ctx.moveTo(20, 0)
