@@ -19,11 +19,11 @@ slam_toolbox:
     resolution: 0.05
 
     # Matching params
-    # No odometry position - SLAM uses pure LIDAR scan matching
-    # Set to 0 to process every scan and detect motion from scan differences
-    minimum_travel_distance: 0.0  # meters (disabled - scan matching only)
-    minimum_travel_heading: 0.0   # radians (disabled - scan matching only)
-    scan_buffer_size: 10
+    # DISABLED: odometry is at origin, so SLAM must process scans to detect motion
+    # Motion detection via scan-to-scan comparison instead
+    minimum_travel_distance: 0.0  # meters (disabled - no wheel encoders)
+    minimum_travel_heading: 0.0   # radians (disabled - no wheel encoders)
+    scan_buffer_size: 5  # Reduced from 10 to lower memory/processing overhead
     scan_buffer_maximum_scan_distance: 10.0
     link_match_minimum_response_fine: 0.1
     link_scan_maximum_distance: 1.5
@@ -33,10 +33,10 @@ slam_toolbox:
     minimum_distance_penalty: 0.5
     use_response_expansion: true
 
-    # Loop closure
-    loop_search_maximum_distance: 3.0
+    # Loop closure (tuned for lower CPU usage)
+    loop_search_maximum_distance: 2.0  # Reduced from 3.0m
     do_loop_closing: true
-    loop_match_minimum_chain_size: 10
+    loop_match_minimum_chain_size: 15  # Increased from 10 for less aggressive detection
     loop_match_maximum_variance_coarse: 3.0
     loop_match_minimum_response_coarse: 0.35
     loop_match_minimum_response_fine: 0.45
@@ -51,16 +51,16 @@ slam_toolbox:
     coarse_angle_resolution: 0.0349    # 2 degrees
     fine_search_angle_offset: 0.00349  # 0.2 degrees
 
-    # Async mode (online SLAM)
+    # Async mode (online SLAM - tuned for Pi 5)
     max_laser_range: 12.0  # RPLIDAR C1 max range
     minimum_laser_range: 0.2  # Match RPLIDAR minimum range
     min_laser_range: 0.2      # Alias for slam_toolbox versions using min_laser_range
     minimum_distance_to_read: 0.2
-    minimum_time_interval: 0.1  # 10Hz update rate
-    transform_publish_period: 0.05  # 20Hz TF publishing
+    minimum_time_interval: 0.15  # ~6.7Hz scan processing (reduced load)
+    transform_publish_period: 0.1  # 10Hz TF publishing (reduced from 20Hz)
 
     # Map update parameters
-    map_update_interval: 2.0  # Publish map every 2 seconds
+    map_update_interval: 3.0  # Publish map every 3 seconds (reduced from 2s)
 
     # Threading
     enable_interactive_mode: false  # Set to true for manual control
