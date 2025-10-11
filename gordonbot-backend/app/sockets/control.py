@@ -109,24 +109,29 @@ def seconds_since_last_command() -> float:
     return time.monotonic() - _LAST_COMMAND_TS
 
 
-def process_drive_command(left: float, right: float, *, source: str = "unknown") -> tuple[float, float]:
-    """Apply clamping, shaping, and motor output. Keeps watchdog happy."""
+def process_drive_command(left: float, right: float, *, source: str = "unknown", shape: bool = True) -> tuple[float, float]:
+    """Apply clamping, optional shaping, and motor output. Keeps watchdog happy."""
     left_clamped = max(-1.0, min(1.0, float(left)))
     right_clamped = max(-1.0, min(1.0, float(right)))
 
-    shaped_left = _shape(left_clamped)
-    shaped_right = _shape(right_clamped)
+    if shape:
+        shaped_left = _shape(left_clamped)
+        shaped_right = _shape(right_clamped)
+    else:
+        shaped_left = left_clamped
+        shaped_right = right_clamped
 
     _motors.set(left=shaped_left, right=shaped_right)
     _set_drive_state(shaped_left, shaped_right)
     _update_last_command()
     log.debug(
-        "drive_cmd source=%s raw=(%.3f, %.3f) shaped=(%.3f, %.3f)",
+        "drive_cmd source=%s raw=(%.3f, %.3f) shaped=(%.3f, %.3f) shape=%s",
         source,
         left_clamped,
         right_clamped,
         shaped_left,
         shaped_right,
+        shape,
     )
     return shaped_left, shaped_right
 

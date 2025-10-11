@@ -46,16 +46,16 @@ _TOF_STOP_DISTANCE_MM = max(30, int(settings.tof_alert_threshold_mm) + 10)
 _GO_TO_MAX_DURATION_S = 120.0
 _GO_TO_STALL_TIMEOUT_S = 6.0
 _GO_TO_POSE_TIMEOUT_S = 1.0
-_GO_TO_FORWARD_MAX = 0.7
-_GO_TO_TURN_MAX = 0.8
-_GO_TO_FORWARD_MIN_ACTIVE = 0.18
+_GO_TO_FORWARD_MAX = 0.7  # Matches CREEP_FORWARD_SPEED (no longer cubed)
+_GO_TO_TURN_MAX = 0.8     # Matches CREEP_TURN_SPEED (no longer cubed)
+_GO_TO_FORWARD_MIN_ACTIVE = 0.7  # Robot requires 0.7 minimum to overcome friction
 
 
 def set_motors(left: float, right: float) -> None:
     """Drive motors immediately with normalized inputs (-1..1) for autonomous routines."""
     left_clamped = _clamp(float(left))
     right_clamped = _clamp(float(right))
-    process_drive_command(left_clamped, right_clamped, source="autonomous")
+    process_drive_command(left_clamped, right_clamped, source="autonomous", shape=False)
 
 
 def stop_motors() -> None:
@@ -517,9 +517,6 @@ async def drive_to_point(
     result: Optional[GoToResult] = None
     reason = "unknown"
     success = False
-
-    # Reset controller for smooth start
-    _drive_controller.reset()
     sensor_elapsed = _SENSOR_INTERVAL
 
     try:
@@ -541,36 +538,45 @@ async def drive_to_point(
                 if distance <= tolerance:
                     success = True
                     reason = "reached"
-                    _drive_controller.set_target(0.0, 0.0)
+                    stop_motors()
                     break
 
                 heading_error = _normalize_angle_rad(math.atan2(dy, dx) - float(pose.theta))
-
-                forward_target = _clamp(distance * 1.2, 0.0, _GO_TO_FORWARD_MAX)
-                if forward_target < _GO_TO_FORWARD_MIN_ACTIVE and distance > tolerance * 1.2:
-                    forward_target = _GO_TO_FORWARD_MIN_ACTIVE
-                turn_target = _clamp(heading_error * 2.2, -_GO_TO_TURN_MAX, _GO_TO_TURN_MAX)
-
                 heading_abs = abs(heading_error)
-                if heading_abs > math.radians(60):
+
+                # Binary movement: robot needs 0.7 to overcome friction, so either go full or stop
+                # Turn command: positive = turn right, negative = turn left
+                turn_sign = 1.0 if heading_error > 0 else -1.0
+
+                # Forward logic: only move if roughly aligned and not too close
+                if distance <= tolerance * 1.5:
+                    # Very close to target - stop and let tolerance check handle completion
                     forward_target = 0.0
-                elif heading_abs > math.radians(35):
-                    forward_target = min(forward_target, 0.25)
-                elif distance < 0.35:
-                    forward_target = min(forward_target, 0.35)
+                    turn_target = 0.0
+                elif heading_abs > math.radians(45):
+                    # Need significant heading correction - turn in place at full speed
+                    forward_target = 0.0
+                    turn_target = turn_sign * _GO_TO_TURN_MAX
+                elif heading_abs > math.radians(10):
+                    # Small correction while moving
+                    forward_target = _GO_TO_FORWARD_MAX
+                    turn_target = turn_sign * _GO_TO_TURN_MAX * 0.5
+                else:
+                    # Well aligned - go straight
+                    forward_target = _GO_TO_FORWARD_MAX
+                    turn_target = 0.0
 
-                if distance < max(tolerance * 2.0, 0.15):
-                    forward_target = min(forward_target, 0.2)
-
-                _drive_controller.set_target(turn_target, forward_target)
+                # Apply commands directly without ramping controller
+                left = _clamp(forward_target + turn_target)
+                right = _clamp(forward_target - turn_target)
+                set_motors(left, right)
 
                 if distance + 1e-3 < best_distance:
                     best_distance = distance
                     progress_reset = now
             else:
-                _drive_controller.set_target(0.0, 0.0)
+                stop_motors()
 
-            _drive_controller.step()
             await asyncio.sleep(_TICK_INTERVAL)
 
             sensor_elapsed += _TICK_INTERVAL
@@ -635,10 +641,6 @@ async def drive_to_point(
             completed_at=stop_wall,
         )
     finally:
-        _drive_controller.set_target(0.0, 0.0)
-        for _ in range(4):
-            _drive_controller.step()
-            await asyncio.sleep(_TICK_INTERVAL)
         stop_motors()
 
     return result
