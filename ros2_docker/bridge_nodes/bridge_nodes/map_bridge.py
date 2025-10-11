@@ -122,6 +122,8 @@ class MapBridge(Node):
 
             # Convert quaternion to yaw (theta)
             # For 2D: yaw = atan2(2*(qw*qz + qx*qy), 1 - 2*(qy^2 + qz^2))
+            # Don't negate - use raw theta from TF
+            # The IMU quaternion remapping and LIDAR 180° rotation already provide correct orientation
             theta = math.atan2(
                 2.0 * (qw * qz + qx * qy),
                 1.0 - 2.0 * (qy * qy + qz * qz)

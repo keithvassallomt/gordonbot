@@ -107,7 +107,7 @@ export default function MapCanvas({ gotoMode = false, onSelectPoint }: MapCanvas
     }
 
     ctx.save()
-    ctx.rotate(-robotTheta)  // Negate to match inverted Y-axis
+    ctx.rotate(-robotTheta)  // Negate because IMU is mounted upside down (rotation direction inverted)
     ctx.fillStyle = "#10b981"
     ctx.beginPath()
     ctx.moveTo(20, 0)

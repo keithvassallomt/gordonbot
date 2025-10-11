@@ -541,11 +541,23 @@ async def drive_to_point(
                     stop_motors()
                     break
 
-                heading_error = _normalize_angle_rad(math.atan2(dy, dx) - float(pose.theta))
+                target_bearing = math.atan2(dy, dx)
+                current_heading = float(pose.theta)
+                # Calculate heading error: positive = target is CCW from heading
+                heading_error_raw = _normalize_angle_rad(target_bearing - current_heading)
+                # Negate because tank drive: positive turn = clockwise, but positive error = CCW
+                heading_error = -heading_error_raw
                 heading_abs = abs(heading_error)
 
+                log.debug(
+                    "Nav: robot=(%.2f,%.2f,%.2f°) target=(%.2f,%.2f) bearing=%.2f° error_raw=%.2f° error=%.2f° dist=%.2fm",
+                    pose.x, pose.y, math.degrees(current_heading),
+                    target_x, target_y, math.degrees(target_bearing),
+                    math.degrees(heading_error_raw), math.degrees(heading_error), distance
+                )
+
                 # Binary movement: robot needs 0.7 to overcome friction, so either go full or stop
-                # Turn command: positive = turn right, negative = turn left
+                # Turn command: positive = turn right (CW), negative = turn left (CCW)
                 turn_sign = 1.0 if heading_error > 0 else -1.0
 
                 # Forward logic: only move if roughly aligned and not too close
