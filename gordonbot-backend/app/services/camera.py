@@ -219,20 +219,153 @@ class Camera:
                 from picamera2.outputs import FileOutput  # type: ignore
                 import subprocess, shlex
 
-                # Launch ffmpeg to read raw H.264 from stdin and push to RTSP
-                # Low-latency: UDP transport for WiFi 6E
-                cmd = [
-                    "ffmpeg", "-loglevel", "warning",
-                    "-f", "h264", "-i", "-",
-                    "-c", "copy",
-                    "-rtsp_transport", "udp",
-                    "-f", "rtsp", rtsp_url,
-                ]
-                self._ffmpeg_proc = subprocess.Popen(
-                    cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
-                )
-                if not self._ffmpeg_proc or not self._ffmpeg_proc.stdin:
-                    log.error("Failed to start ffmpeg subprocess for RTSP publish")
+                audio_enabled_cfg = bool(getattr(settings, "camera_audio_enabled", False))
+                raw_device = getattr(settings, "camera_audio_device", "default") or "default"
+                audio_backend = "alsa"
+
+                if raw_device.startswith("pulse:"):
+                    audio_backend = "pulse"
+                    audio_device = raw_device.split(":", 1)[1] or "default"
+                elif raw_device.startswith("pipewire:"):
+                    audio_backend = "pulse"  # ffmpeg maps PipeWire via pulse plugin most reliably
+                    audio_device = raw_device.split(":", 1)[1] or "default"
+                else:
+                    audio_device = raw_device
+
+                audio_channels = int(getattr(settings, "camera_audio_channels", 1) or 1)
+                audio_sample_rate = int(getattr(settings, "camera_audio_sample_rate", 16000) or 16000)
+                audio_bitrate = int(getattr(settings, "camera_audio_bitrate", 64000) or 64000)
+
+                def build_cmd(include_audio: bool) -> list[str]:
+                    base_cmd: list[str] = [
+                        "ffmpeg",
+                        "-loglevel",
+                        "error",
+                        "-nostats",
+                        "-thread_queue_size",
+                        "64",
+                        "-fflags",
+                        "nobuffer+discardcorrupt",
+                        "-flags",
+                        "low_delay",
+                        "-f",
+                        "h264",
+                        "-i",
+                        "-",
+                    ]
+
+                    if include_audio:
+                        base_cmd.extend(
+                            [
+                                "-f",
+                                audio_backend,
+                                "-ac",
+                                str(max(1, audio_channels)),
+                                "-ar",
+                                str(max(8_000, audio_sample_rate)),
+                                "-i",
+                                audio_device,
+                                "-map",
+                                "0:v:0",
+                                "-map",
+                                "1:a:0",
+                                "-c:v",
+                                "copy",
+                                "-c:a",
+                                "libopus",
+                                "-b:a",
+                                str(max(24_000, audio_bitrate)),
+                                "-compression_level",
+                                "0",
+                                "-frame_duration",
+                                "10",
+                                "-avioflags",
+                                "direct",
+                            ]
+                        )
+                    else:
+                        base_cmd.extend(["-c", "copy"])
+
+                    base_cmd.extend(
+                        [
+                            "-rtsp_transport",
+                            "udp",
+                            "-fflags",
+                            "nobuffer+discardcorrupt",
+                            "-flush_packets",
+                            "1",
+                            "-f",
+                            "rtsp",
+                            rtsp_url,
+                        ]
+                    )
+                    return base_cmd
+
+                def launch_ffmpeg(include_audio: bool) -> bool:
+                    cmd = build_cmd(include_audio)
+                    log.debug("Camera publisher ffmpeg cmd: %s", shlex.join(cmd))
+                    if include_audio:
+                        log.info(
+                            "Camera publisher audio enabled (device=%s, %s Hz, %s ch, bitrate=%sbps)",
+                            audio_device,
+                            audio_sample_rate,
+                            audio_channels,
+                            audio_bitrate,
+                        )
+                    try:
+                        proc = subprocess.Popen(
+                            cmd,
+                            stdin=subprocess.PIPE,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.PIPE,
+                        )
+                    except FileNotFoundError:
+                        raise
+                    except Exception as exc:
+                        log.error("Failed to start ffmpeg subprocess (audio=%s): %s", include_audio, exc)
+                        return False
+
+                    if not proc or not proc.stdin:
+                        log.error("Failed to start ffmpeg subprocess for RTSP publish")
+                        if proc:
+                            try:
+                                proc.terminate()
+                            except Exception:
+                                pass
+                        return False
+
+                    time.sleep(0.1)
+                    if proc.poll() is not None:
+                        stderr_preview = b""
+                        try:
+                            stderr_preview = proc.stderr.read(512) if proc.stderr else b""
+                        except Exception:
+                            pass
+                        log.error(
+                            "ffmpeg publisher exited immediately (code=%s, audio=%s). stderr=%s",
+                            proc.returncode,
+                            include_audio,
+                            stderr_preview.decode(errors="ignore"),
+                        )
+                        try:
+                            proc.terminate()
+                        except Exception:
+                            pass
+                        return False
+
+                    self._ffmpeg_proc = proc
+                    return True
+
+                include_audio = audio_enabled_cfg
+                started = launch_ffmpeg(include_audio)
+                if not started and include_audio:
+                    log.warning(
+                        "Camera publisher audio initialisation failed; retrying without audio to keep video stream running"
+                    )
+                    started = launch_ffmpeg(False)
+
+                if not started:
+                    self._ffmpeg_proc = None
                     return False
 
                 # Low-latency encoder: baseline profile (no B-frames), repeat SPS/PPS, keyframe every 1s

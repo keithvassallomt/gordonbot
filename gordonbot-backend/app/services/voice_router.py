@@ -88,6 +88,7 @@ def _record_relay_message() -> bytes:
     try:
         recorder = SpeechRecorder(
             device_index=settings.wakeword_audio_device_index,
+            device_name=getattr(settings, "wakeword_audio_device", None),
             vad_aggressiveness=settings.speech_vad_aggressiveness,
             silence_ms=settings.speech_vad_silence_ms,
             max_ms=settings.speech_vad_max_ms,

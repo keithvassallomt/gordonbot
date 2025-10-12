@@ -39,6 +39,7 @@ class WakeWordService:
         keyword_path: str,
         sensitivity: float = 0.6,
         device_index: int | None = None,
+        device_name: str | None = None,
         *,
         callback: DetectionCallback | None = None,
         allow_missing_deps: bool = True,
@@ -47,6 +48,7 @@ class WakeWordService:
         self._keyword_path = keyword_path
         self._sensitivity = max(0.0, min(1.0, sensitivity))
         self._device_index = device_index
+        self._device_name = device_name
         self._callback = callback
         self._allow_missing_deps = allow_missing_deps
 
@@ -55,6 +57,51 @@ class WakeWordService:
         self._stats_lock = threading.Lock()
         self._stats = WakeWordStats()
         self._recent_detections: Deque[datetime] = deque(maxlen=10)
+
+    def _resolve_device_index(self) -> int:
+        resolved = self._device_index if self._device_index is not None else -1
+        if not self._device_name:
+            return resolved
+
+        if self._device_name.isdigit():
+            return int(self._device_name)
+
+        if PvRecorder is None:
+            log.warning(
+                "Requested wake-word audio device '%s' but PvRecorder is unavailable; falling back to index %s",
+                self._device_name,
+                resolved,
+            )
+            return resolved
+
+        try:
+            if hasattr(PvRecorder, "get_available_devices"):
+                devices = PvRecorder.get_available_devices()
+            elif hasattr(PvRecorder, "get_audio_devices"):
+                devices = PvRecorder.get_audio_devices()
+            else:
+                raise AttributeError("PvRecorder does not expose device enumeration helpers")
+        except Exception as exc:  # pragma: no cover - PvRecorder IO
+            log.warning(
+                "Failed to enumerate PvRecorder devices while looking for '%s': %s",
+                self._device_name,
+                exc,
+            )
+            return resolved
+
+        for idx, name in enumerate(devices):
+            if name == self._device_name:
+                return idx
+        for idx, name in enumerate(devices):
+            if self._device_name.lower() in name.lower():
+                return idx
+
+        log.warning(
+            "Requested wake-word audio device '%s' not found; available devices: %s",
+            self._device_name,
+            ", ".join(devices) if devices else "<none>",
+        )
+        return resolved
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -107,16 +154,18 @@ class WakeWordService:
 
         frame_length = porcupine.frame_length
         sample_rate = porcupine.sample_rate
+        resolved_device = self._resolve_device_index()
         log.info(
-            "Wake word listener starting (device=%s, frame=%d, rate=%d)",
-            self._device_index,
+            "Wake word listener starting (device_index=%s, device_name=%s, frame=%d, rate=%d)",
+            resolved_device,
+            self._device_name,
             frame_length,
             sample_rate,
         )
 
         try:
             recorder = PvRecorder(
-                device_index=self._device_index if self._device_index is not None else -1,
+                device_index=resolved_device,
                 frame_length=frame_length,
             )
             recorder.start()

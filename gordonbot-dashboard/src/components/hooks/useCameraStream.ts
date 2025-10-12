@@ -32,7 +32,7 @@ export interface UseCameraStreamOptions {
 }
 
 export interface CameraStreamControls {
-  videoRef: React.RefObject<HTMLVideoElement>
+  videoRef: React.RefObject<HTMLVideoElement | null>
   startLocalDemo: () => Promise<void>
   startWebRTC: (opts?: { auto?: boolean }) => Promise<boolean>
   stop: (opts?: { keepRawPublisher?: boolean }) => Promise<void>
@@ -50,6 +50,9 @@ export interface CameraStreamState extends CameraStreamControls {
   initialising: boolean
   whepUrl: string | null
   mjpegUrl: string
+  mediaStream: MediaStream | null
+  getCurrentStream: () => MediaStream | null
+  hasAudioTrack: boolean
 }
 
 export function useCameraStream(options: UseCameraStreamOptions = {}): CameraStreamState {
@@ -71,6 +74,23 @@ export function useCameraStream(options: UseCameraStreamOptions = {}): CameraStr
   const [rawFeedActive, setRawFeedActive] = useState(false)
   const [rawFeedStartSupported, setRawFeedStartSupported] = useState(true)
   const [initialising, setInitialising] = useState(true)
+  const [mediaStream, setMediaStream] = useState<MediaStream | null>(null)
+  const [hasAudioTrack, setHasAudioTrack] = useState(false)
+  const streamRef = useRef<MediaStream | null>(null)
+
+  const updateMediaStream = useCallback((stream: MediaStream | null) => {
+    streamRef.current = stream
+    setMediaStream(stream)
+    if (!stream) {
+      setHasAudioTrack(false)
+      return
+    }
+    const audioTracks = stream.getAudioTracks()
+    const hasLiveAudio = audioTracks.some((track) => track.readyState === "live" && !track.muted)
+    setHasAudioTrack(hasLiveAudio)
+  }, [])
+
+  const getCurrentStream = useCallback(() => streamRef.current, [])
 
   const whepUrl = useMemo(() => {
     if (!VIDEO_WHEP_BASE) return null
@@ -116,16 +136,17 @@ export function useCameraStream(options: UseCameraStreamOptions = {}): CameraStr
         await videoRef.current.play()
         setActive(true)
         setStreamTech("MJPEG")
+        updateMediaStream(stream)
       }
     } catch {
       setActive(false)
     }
-  }, [])
+  }, [updateMediaStream])
 
   const stop = useCallback(
     async ({ keepRawPublisher = false }: { keepRawPublisher?: boolean } = {}) => {
-      const mediaStream = videoRef.current?.srcObject as MediaStream | null
-      mediaStream?.getTracks().forEach((track) => track.stop())
+      const existing = videoRef.current?.srcObject as MediaStream | null
+      existing?.getTracks().forEach((track) => track.stop())
       if (videoRef.current) {
         videoRef.current.srcObject = null
       }
@@ -138,11 +159,20 @@ export function useCameraStream(options: UseCameraStreamOptions = {}): CameraStr
       }
       pcRef.current = null
       setInitialising(false)
+      const currentStream = streamRef.current
+      currentStream?.getTracks().forEach((track) => {
+        try {
+          track.stop()
+        } catch {
+          // ignore stop errors
+        }
+      })
+      updateMediaStream(null)
       if (!keepRawPublisher) {
         await stopRawFeed()
       }
     },
-    [stopRawFeed],
+    [stopRawFeed, updateMediaStream],
   )
 
   const startWebRTC = useCallback(
@@ -170,9 +200,21 @@ export function useCameraStream(options: UseCameraStreamOptions = {}): CameraStr
         }
 
         pc.addTransceiver("video", { direction: "recvonly" })
+        pc.addTransceiver("audio", { direction: "recvonly" })
         pc.ontrack = (event) => {
           stream.addTrack(event.track)
+          updateMediaStream(stream)
+          event.track.addEventListener("ended", () => {
+            updateMediaStream(stream)
+          })
+          event.track.addEventListener("mute", () => {
+            updateMediaStream(stream)
+          })
+          event.track.addEventListener("unmute", () => {
+            updateMediaStream(stream)
+          })
         }
+        updateMediaStream(stream)
 
         const offer = await pc.createOffer()
         await pc.setLocalDescription(offer)
@@ -230,12 +272,13 @@ export function useCameraStream(options: UseCameraStreamOptions = {}): CameraStr
         if (auto) {
           setInitialising(true)
         }
+        updateMediaStream(null)
         return false
       } finally {
         setConnecting(false)
       }
     },
-    [ensureRawFeed, streamKind, whepUrl],
+    [ensureRawFeed, streamKind, updateMediaStream, whepUrl],
   )
 
   useEffect(() => {
@@ -328,5 +371,8 @@ export function useCameraStream(options: UseCameraStreamOptions = {}): CameraStr
     initialising,
     whepUrl,
     mjpegUrl,
+    mediaStream,
+    getCurrentStream,
+    hasAudioTrack,
   }
 }

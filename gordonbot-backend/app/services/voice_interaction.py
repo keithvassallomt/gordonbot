@@ -38,6 +38,7 @@ class SpeechRecorder:
         self,
         *,
         device_index: int | None,
+        device_name: str | None,
         vad_aggressiveness: int,
         silence_ms: int,
         max_ms: int,
@@ -46,7 +47,43 @@ class SpeechRecorder:
         if webrtcvad is None or PvRecorder is None:
             raise RuntimeError("Speech recording unavailable: missing webrtcvad or pvrecorder")
 
-        self._device_index = device_index if device_index is not None else -1
+        if device_name and device_name.isdigit():
+            device_index = int(device_name)
+
+        resolved_index = device_index if device_index is not None else -1
+
+        if device_name and PvRecorder is not None:
+            try:
+                if hasattr(PvRecorder, "get_available_devices"):
+                    devices = PvRecorder.get_available_devices()
+                elif hasattr(PvRecorder, "get_audio_devices"):
+                    devices = PvRecorder.get_audio_devices()
+                else:
+                    raise AttributeError("PvRecorder does not expose device enumeration helpers")
+                exact_matches = [idx for idx, name in enumerate(devices) if name == device_name]
+                if exact_matches:
+                    resolved_index = exact_matches[0]
+                else:
+                    partial_matches = [
+                        idx for idx, name in enumerate(devices) if device_name.lower() in name.lower()
+                    ]
+                    if partial_matches:
+                        resolved_index = partial_matches[0]
+                    else:
+                        log.warning(
+                            "Requested audio device '%s' not found in PvRecorder device list; using index %s",
+                            device_name,
+                            resolved_index,
+                        )
+            except Exception as exc:
+                log.warning(
+                    "Failed to enumerate PvRecorder devices for '%s' (%s). Falling back to index %s.",
+                    device_name,
+                    exc,
+                    resolved_index,
+                )
+
+        self._device_index = resolved_index
         self._vad = webrtcvad.Vad(max(0, min(3, vad_aggressiveness)))
         self._silence_frames = max(1, silence_ms // 20)
         self._max_frames = max(1, max_ms // 20)
@@ -204,6 +241,7 @@ class VoiceInteractionController:
         try:
             recorder = SpeechRecorder(
                 device_index=self._settings.wakeword_audio_device_index,
+                device_name=getattr(self._settings, "wakeword_audio_device", None),
                 vad_aggressiveness=self._settings.speech_vad_aggressiveness,
                 silence_ms=self._settings.speech_vad_silence_ms,
                 max_ms=self._settings.speech_vad_max_ms,

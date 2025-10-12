@@ -17,7 +17,7 @@ const clampWithin = (value: number, min: number, max: number) => {
   return Math.min(Math.max(value, min), max)
 }
 
-export function CameraOverlay(): JSX.Element {
+export function CameraOverlay() {
   const {
     videoRef,
     setStreamKind,

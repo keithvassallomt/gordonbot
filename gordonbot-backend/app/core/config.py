@@ -37,6 +37,11 @@ class Settings(BaseModel):
     camera_rtsp_annot_url: str | None = os.getenv("CAMERA_RTSP_ANNOT_URL")
     annot_fps: int = int(os.getenv("ANNOT_FPS", "10"))
     annot_min_area: int = int(os.getenv("ANNOT_MIN_AREA", "600"))  # min bbox area in downscaled space
+    camera_audio_enabled: bool = _getenv_bool("CAMERA_AUDIO_ENABLED", False)
+    camera_audio_device: str = os.getenv("CAMERA_AUDIO_DEVICE", "default")
+    camera_audio_channels: int = int(os.getenv("CAMERA_AUDIO_CHANNELS", "1"))
+    camera_audio_sample_rate: int = int(os.getenv("CAMERA_AUDIO_SAMPLE_RATE", "16000"))
+    camera_audio_bitrate: int = int(os.getenv("CAMERA_AUDIO_BITRATE", "64000"))
     # Base URL for MediaMTX HTTP signaling. Can include or omit '/whep'.
     # Combined with MEDIAMTX_WHEP_STYLE to form the final target.
     mediamtx_whep_base: str = os.getenv("MEDIAMTX_WHEP_BASE", "http://127.0.0.1:8889/whep")
@@ -102,6 +107,7 @@ class Settings(BaseModel):
         str(BACKEND_ROOT / "models" / "porcupine" / "gordon.ppn"),
     )
     wakeword_sensitivity: float = float(os.getenv("WAKEWORD_SENSITIVITY", "0.6"))
+    wakeword_audio_device: str | None = os.getenv("WAKEWORD_AUDIO_DEVICE")
     wakeword_audio_device_index: int | None = (
         int(os.environ["WAKEWORD_AUDIO_DEVICE_INDEX"])
         if os.getenv("WAKEWORD_AUDIO_DEVICE_INDEX") not in (None, "")

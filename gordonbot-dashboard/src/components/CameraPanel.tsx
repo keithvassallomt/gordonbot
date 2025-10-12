@@ -1,7 +1,8 @@
+import { useEffect, useRef, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Activity, Camera as CameraIcon } from "lucide-react"
+import { Activity, Camera as CameraIcon, Volume2, VolumeX } from "lucide-react"
 import { useCameraStream } from "./hooks/useCameraStream"
 
 /**
@@ -36,7 +37,101 @@ export default function CameraPanel() {
     initialising,
     whepUrl,
     mjpegUrl,
+    getCurrentStream,
+    hasAudioTrack,
   } = useCameraStream()
+
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const [audioEnabled, setAudioEnabled] = useState(false)
+  const [audioLoading, setAudioLoading] = useState(false)
+  const [audioError, setAudioError] = useState<string | null>(null)
+
+  const audioButtonDisabled = audioLoading || (!hasAudioTrack && !audioEnabled)
+
+  useEffect(() => {
+    const audioEl = audioRef.current
+    if (!audioEnabled) {
+      if (audioEl) {
+        audioEl.pause()
+        audioEl.srcObject = null
+      }
+      return
+    }
+
+    const stream = getCurrentStream()
+
+    if (!stream || stream.getAudioTracks().length === 0 || !hasAudioTrack) {
+      if (audioEl) {
+        audioEl.pause()
+        audioEl.srcObject = null
+      }
+      setAudioEnabled(false)
+      setAudioError("Camera audio track unavailable")
+      return
+    }
+
+    if (audioEl) {
+      audioEl.srcObject = stream
+      audioEl.muted = false
+      const playResult = audioEl.play()
+      if (playResult && typeof playResult.catch === "function") {
+        playResult.catch((err: unknown) => {
+          console.debug("audio play failed", err)
+          setAudioError("Unable to start audio playback")
+          setAudioEnabled(false)
+        })
+      }
+    }
+  }, [audioEnabled, getCurrentStream, hasAudioTrack])
+
+  useEffect(() => {
+    return () => {
+      const audioEl = audioRef.current
+      if (audioEl) {
+        audioEl.pause()
+        audioEl.srcObject = null
+      }
+    }
+  }, [])
+
+  const handleToggleAudio = async () => {
+    if (audioEnabled) {
+      const audioEl = audioRef.current
+      if (audioEl) {
+        audioEl.pause()
+        audioEl.srcObject = null
+      }
+      setAudioEnabled(false)
+      setAudioError(null)
+      return
+    }
+
+    setAudioLoading(true)
+    try {
+      setAudioError(null)
+      if (!active) {
+        const success = await startWebRTC()
+        if (!success) {
+          throw new Error("Unable to connect camera stream")
+        }
+      }
+      const stream = getCurrentStream() ?? (videoRef.current?.srcObject as MediaStream | null)
+      if (!stream) {
+        throw new Error("Camera stream unavailable")
+      }
+      if (stream.getAudioTracks().length === 0 || !hasAudioTrack) {
+        throw new Error("Camera audio track unavailable")
+      }
+      setAudioError(null)
+      setAudioEnabled(true)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to start audio"
+      setAudioError(message)
+      setAudioEnabled(false)
+    } finally {
+      setAudioLoading(false)
+    }
+  }
 
   const containerClass = "aspect-video"
   const videoObjectClass = "object-cover"
@@ -47,7 +142,7 @@ export default function CameraPanel() {
         <CardTitle className="flex items-center gap-2 text-base">
           <CameraIcon className="h-4 w-4" /> Camera
         </CardTitle>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <Badge variant="default" className="flex items-center gap-1">
             <Activity className="h-3 w-3" /> Live
           </Badge>
@@ -100,7 +195,34 @@ export default function CameraPanel() {
               )
             )}
           </div>
+          {whepUrl && (
+            <Button
+              size="sm"
+              variant={audioEnabled ? "default" : "outline"}
+              onClick={() => { void handleToggleAudio() }}
+              disabled={audioButtonDisabled}
+            >
+              {audioLoading ? (
+                "Audio…"
+              ) : (
+                <>
+                  {audioEnabled ? <VolumeX className="mr-1 h-4 w-4" /> : <Volume2 className="mr-1 h-4 w-4" />}
+                  {audioEnabled ? "Mute audio" : "Hear audio"}
+                </>
+              )}
+            </Button>
+          )}
         </div>
+        {!hasAudioTrack && whepUrl && !audioEnabled && !audioError && (
+          <div className="flex w-full justify-end text-muted-foreground">
+            <VolumeX className="h-3.5 w-3.5 opacity-60" aria-hidden="true" />
+          </div>
+        )}
+        {audioError && (
+          <div className="w-full text-right text-xs text-destructive">
+            {audioError}
+          </div>
+        )}
       </CardHeader>
       <CardContent>
         <div className={`${containerClass} w-full overflow-hidden rounded-lg border bg-black relative`}>
@@ -127,6 +249,7 @@ export default function CameraPanel() {
             </div>
           )}
         </div>
+        <audio ref={audioRef} className="hidden" />
       </CardContent>
     </Card>
   )

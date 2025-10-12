@@ -224,6 +224,7 @@ async def _start_streaming_if_configured() -> None:
                     keyword_path=settings.wakeword_keyword_path,
                     sensitivity=settings.wakeword_sensitivity,
                     device_index=settings.wakeword_audio_device_index,
+                    device_name=settings.wakeword_audio_device,
                     callback=_on_wake_word_detected,
                     allow_missing_deps=settings.wakeword_allow_missing_deps,
                 )

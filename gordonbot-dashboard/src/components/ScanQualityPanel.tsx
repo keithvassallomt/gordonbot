@@ -1,5 +1,4 @@
 import React from "react"
-import { Badge } from "@/components/ui/badge"
 import { AlertCircle, CheckCircle, AlertTriangle, XCircle, Activity } from "lucide-react"
 import { useScanQuality, type QualityLevel } from "@/components/hooks/useScanQuality"
 
