@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Camera, Map as MapIcon, Radar } from "lucide-react"
@@ -12,6 +12,7 @@ import OrientationPanel from "./OrientationPanel"
 import ControlPanel from "./ControlPanel";
 import LidarPanel from "./LidarPanel";
 import NavigationPanel from "./NavigationPanel"
+import { CameraOverlay } from "./CameraOverlay"
 
 import { useBattery } from "./hooks/useBattery";
 import { useControlTransport } from "./hooks/useControlTransport"
@@ -49,6 +50,8 @@ export default function GordonBotDashboard() {
   const theme = useThemeMode();
   const transport = useControlTransport(CONTROL_WS_PATH)
   const { data: battery } = useBattery(10000);
+  const [activeTab, setActiveTab] = useState<"camera" | "lidar" | "map">("camera")
+  const showCameraOverlay = activeTab === "map"
 
   // Auto-connect drive controls on load; clean up on unmount
   useEffect(() => {
@@ -72,7 +75,7 @@ export default function GordonBotDashboard() {
           {/* Left: Camera/Map/LIDAR tabs (span 3 cols on desktop) */}
           <section className="lg:col-span-3 space-y-4">
             <div>
-              <Tabs defaultValue="camera" className="w-full">
+              <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as typeof activeTab)} className="w-full">
                 <TabsList className="grid w-full grid-cols-3">
                   <TabsTrigger value="camera" className="flex items-center gap-2"><Camera className="h-4 w-4"/> Camera</TabsTrigger>
                   <TabsTrigger value="lidar" className="flex items-center gap-2"><Radar className="h-4 w-4"/> LiDAR</TabsTrigger>
@@ -105,6 +108,7 @@ export default function GordonBotDashboard() {
           Built with React, Tailwind, and shadcn/ui • Keyboard + On-screen controls • Theme persists in localStorage
         </footer>
         </div>
+        {showCameraOverlay && <CameraOverlay />}
       </TooltipProvider>
     </SlamModeProvider>
   );
