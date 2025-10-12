@@ -158,4 +158,23 @@ def generate_launch_description():
                 'base_frame': 'base_link'
             }]
         ),
+
+        # Scan quality monitor node (monitors LIDAR scan quality)
+        Node(
+            package='bridge_nodes',
+            executable='scan_quality_monitor',
+            name='scan_quality_monitor',
+            output='screen',
+            parameters=[{
+                'use_sim_time': use_sim_time,
+                'ws_port': 9002,
+                'scan_topic': '/scan',
+                'min_point_count': 100,
+                'min_scan_density': 0.5,
+                'min_angular_coverage': 0.7,
+                'max_allowed_gap': 45.0,
+                'expected_scan_rate': 10.0,
+                'report_rate_hz': 1.0
+            }]
+        ),
     ])

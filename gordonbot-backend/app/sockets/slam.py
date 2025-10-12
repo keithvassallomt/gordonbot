@@ -13,6 +13,8 @@ import websockets
 log = logging.getLogger(__name__)
 
 from app.schemas import SlamMapMessage, SlamPoseMessage
+from app.services.map_quality_analyzer import default_analyzer
+
 router = APIRouter()
 
 # Store connected clients
@@ -24,6 +26,9 @@ latest_pose: Optional[dict] = None
 latest_map_obj: Optional[SlamMapMessage] = None
 latest_pose_obj: Optional[SlamPoseMessage] = None
 
+# Map quality analysis
+latest_map_quality: Optional[dict] = None
+
 # Connection to map_bridge WebSocket
 map_bridge_ws: Optional[websockets.WebSocketClientProtocol] = None
 map_bridge_task: Optional[asyncio.Task] = None
@@ -31,7 +36,7 @@ map_bridge_task: Optional[asyncio.Task] = None
 
 async def connect_to_map_bridge():
     """Connect to ROS2 map_bridge WebSocket and relay data."""
-    global latest_map, latest_pose, latest_map_obj, latest_pose_obj, map_bridge_ws
+    global latest_map, latest_pose, latest_map_obj, latest_pose_obj, latest_map_quality, map_bridge_ws
 
     map_bridge_url = "ws://localhost:9001"
 
@@ -57,6 +62,30 @@ async def connect_to_map_bridge():
                             except ValidationError as exc:
                                 log.debug("Failed to validate SLAM map message: %s", exc)
                                 latest_map_obj = None
+
+                            # Analyze map structure quality (Phase 2)
+                            try:
+                                map_metrics = default_analyzer.analyze_map_structure(msg)
+                                latest_map_quality = {
+                                    "explored_ratio": map_metrics.explored_ratio,
+                                    "occupied_ratio": map_metrics.occupied_ratio,
+                                    "entropy": map_metrics.entropy,
+                                    "noise_score": map_metrics.noise_score,
+                                    "wall_sharpness": map_metrics.wall_sharpness,
+                                    "feature_density": map_metrics.feature_density,
+                                    "corner_count": map_metrics.corner_count,
+                                    "edge_count": map_metrics.edge_count,
+                                    "quality_level": map_metrics.quality_level.value,
+                                    "quality_score": map_metrics.quality_score,
+                                    "issues": map_metrics.issues,
+                                    "warnings": map_metrics.warnings,
+                                    "has_walls": map_metrics.has_walls,
+                                    "is_empty": map_metrics.is_empty
+                                }
+                            except Exception as e:
+                                log.debug(f"Map quality analysis failed: {e}")
+                                latest_map_quality = None
+
                             # Broadcast to all connected clients
                             await broadcast_to_clients(msg)
 
@@ -173,3 +202,10 @@ def get_latest_map() -> Optional[SlamMapMessage]:
     if latest_map_obj is None:
         return None
     return latest_map_obj.model_copy()
+
+
+def get_latest_map_quality() -> Optional[dict]:
+    """Return the most recent map quality analysis, if available."""
+    if latest_map_quality is None:
+        return None
+    return latest_map_quality.copy()

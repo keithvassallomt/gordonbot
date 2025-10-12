@@ -25,6 +25,7 @@ setup(
             'imu_bridge = bridge_nodes.imu_bridge:main',
             'imu_odom_bridge = bridge_nodes.imu_odom_bridge:main',
             'map_bridge = bridge_nodes.map_bridge:main',
+            'scan_quality_monitor = bridge_nodes.scan_quality_monitor:main',
         ],
     },
 )

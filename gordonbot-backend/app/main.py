@@ -91,10 +91,12 @@ from app.routers import wakeword as wakeword_router
 from app.routers import orientation as orientation_router
 from app.routers import lidar as lidar_router
 from app.routers import slam as slam_router
+from app.routers import scan_quality as scan_quality_router
 from app.sockets import control as control_socket
 from app.sockets import orientation as orientation_socket
 from app.sockets import lidar as lidar_socket
 from app.sockets import slam as slam_socket
+from app.sockets import scan_quality as scan_quality_socket
 from app.services.camera import camera
 from app.services.audio_playback import AudioCuePlayer
 from app.services.wake_word import WakeWordService
@@ -143,6 +145,7 @@ api.include_router(wakeword_router.router, prefix="")
 api.include_router(orientation_router.router, prefix="")
 api.include_router(lidar_router.router, prefix="")
 api.include_router(slam_router.router, prefix="")
+api.include_router(scan_quality_router.router, prefix="")
 
 app.mount(settings.api_prefix, api)
 
@@ -151,6 +154,7 @@ app.include_router(control_socket.router)
 app.include_router(orientation_socket.router)
 app.include_router(lidar_socket.router)
 app.include_router(slam_socket.router)
+app.include_router(scan_quality_socket.router)
 
 # (Optional for deployment) Serve built frontend from ./dist
 # app.mount("/", StaticFiles(directory="dist", html=True), name="static")
@@ -279,6 +283,13 @@ async def _start_streaming_if_configured() -> None:
         log.info("Started SLAM map_bridge connection")
     except Exception as exc:
         log.error("Failed to start SLAM map_bridge connection: %s", exc)
+
+    # Start scan quality monitor connection
+    try:
+        scan_quality_socket.start_quality_monitor_connection()
+        log.info("Started scan quality monitor connection")
+    except Exception as exc:
+        log.error("Failed to start scan quality monitor connection: %s", exc)
 
 
 @app.on_event("shutdown")

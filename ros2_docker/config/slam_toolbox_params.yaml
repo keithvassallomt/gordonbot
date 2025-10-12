@@ -21,6 +21,7 @@ slam_toolbox:
     # Matching params
     # DISABLED: odometry is at origin, so SLAM must process scans to detect motion
     # Motion detection via scan-to-scan comparison instead
+    # CANNOT use motion filtering without wheel encoders - creates catch-22
     minimum_travel_distance: 0.0  # meters (disabled - no wheel encoders)
     minimum_travel_heading: 0.0   # radians (disabled - no wheel encoders)
     scan_buffer_size: 5  # Reduced from 10 to lower memory/processing overhead

@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { ChevronDown } from "lucide-react"
 import MapCanvas from "./MapCanvas"
+import ScanQualityPanel from "./ScanQualityPanel"
 import { API_BASE } from "@/components/config"
 import { useSlamMode } from "./contexts/SlamModeContext"
 
@@ -30,6 +33,7 @@ export default function SlamMapPanel() {
   const [goToLoading, setGoToLoading] = useState(false)
   const [goToStatus, setGoToStatus] = useState<GoToState | null>(null)
   const [toast, setToast] = useState<GoToToast | null>(null)
+  const [qualityOpen, setQualityOpen] = useState(false)
   const statusTimerRef = useRef<number | null>(null)
 
   const fetchGoToStatus = useCallback(async (quiet = false) => {
@@ -195,6 +199,18 @@ export default function SlamMapPanel() {
         <div className="h-[560px] w-full">
           <MapCanvas gotoMode={isGoToMode} onSelectPoint={handleGoToSelect} />
         </div>
+
+        {/* Scan Quality Section (Collapsible) */}
+        <Collapsible open={qualityOpen} onOpenChange={setQualityOpen}>
+          <CollapsibleTrigger className="flex w-full items-center justify-between rounded-lg border bg-muted/30 px-4 py-2 text-sm font-medium hover:bg-muted/50">
+            <span>Scan Quality</span>
+            <ChevronDown className={`h-4 w-4 transition-transform ${qualityOpen ? "rotate-180" : ""}`} />
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-3">
+            <ScanQualityPanel />
+          </CollapsibleContent>
+        </Collapsible>
+
         {goToStatus && (
           <div className="flex flex-wrap items-center gap-3 text-xs">
             <Badge variant={goToStatus.state === "running" ? "default" : "secondary"}>
