@@ -56,8 +56,14 @@ class ImuOdomBridge(Node):
         if self.prev_time is not None:
             dt = current_time - self.prev_time
             if dt > 0:
+                # Dead zone: ignore tiny angular velocity to prevent drift when stationary
+                angular_vel_z = msg.angular_velocity.z
+                ANGULAR_VEL_DEAD_ZONE = 0.01  # rad/s (~0.57 deg/s)
+                if abs(angular_vel_z) < ANGULAR_VEL_DEAD_ZONE:
+                    angular_vel_z = 0.0
+
                 # Integrate angular velocity (z-axis rotation)
-                self.theta += msg.angular_velocity.z * dt
+                self.theta += angular_vel_z * dt
                 # Normalize to [-pi, pi]
                 self.theta = math.atan2(math.sin(self.theta), math.cos(self.theta))
         self.prev_time = current_time
