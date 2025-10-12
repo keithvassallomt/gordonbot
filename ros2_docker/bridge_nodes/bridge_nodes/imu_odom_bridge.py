@@ -37,16 +37,31 @@ class ImuOdomBridge(Node):
             10
         )
 
-        # State - only track IMU messages
+        # State - track IMU and cumulative heading
         self.latest_imu = None
+        self.theta = 0.0  # Cumulative heading for motion detection
+        self.prev_time = None
 
         self.get_logger().info(f'IMU Odometry Bridge started')
-        self.get_logger().info(f'Publishing odometry with IMU orientation only')
+        self.get_logger().info(f'Publishing odometry with IMU orientation and cumulative heading')
         self.get_logger().info(f'Position stays at origin - SLAM handles position via scan matching')
+        self.get_logger().info(f'Cumulative heading allows SLAM to detect rotation for motion filtering')
 
     def _imu_callback(self, msg):
         """Callback for IMU messages."""
         self.latest_imu = msg
+
+        # Integrate angular velocity to track cumulative heading
+        current_time = self.get_clock().now().nanoseconds / 1e9
+        if self.prev_time is not None:
+            dt = current_time - self.prev_time
+            if dt > 0:
+                # Integrate angular velocity (z-axis rotation)
+                self.theta += msg.angular_velocity.z * dt
+                # Normalize to [-pi, pi]
+                self.theta = math.atan2(math.sin(self.theta), math.cos(self.theta))
+        self.prev_time = current_time
+
         self._publish_odometry()
 
     def _publish_odometry(self):
@@ -95,7 +110,8 @@ class ImuOdomBridge(Node):
         # Publish odometry
         self.odom_pub.publish(odom)
 
-        # Broadcast TF: odom → base_link with IMU orientation only
+        # Broadcast TF: odom → base_link
+        # Position at origin, but rotation uses cumulative theta for motion detection
         t = TransformStamped()
         t.header.stamp = now.to_msg()
         t.header.frame_id = self.odom_frame
@@ -103,10 +119,15 @@ class ImuOdomBridge(Node):
         t.transform.translation.x = 0.0
         t.transform.translation.y = 0.0
         t.transform.translation.z = 0.0
-        t.transform.rotation.x = rotated[0]
-        t.transform.rotation.y = rotated[1]
-        t.transform.rotation.z = rotated[2]
-        t.transform.rotation.w = rotated[3]
+
+        # Use cumulative theta (from angular velocity integration) for TF
+        # This allows SLAM's minimum_travel_heading to detect rotation
+        qz = math.sin(self.theta / 2.0)
+        qw = math.cos(self.theta / 2.0)
+        t.transform.rotation.x = 0.0
+        t.transform.rotation.y = 0.0
+        t.transform.rotation.z = qz
+        t.transform.rotation.w = qw
 
         self.tf_broadcaster.sendTransform(t)
 

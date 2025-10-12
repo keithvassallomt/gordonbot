@@ -51,8 +51,9 @@ def generate_launch_description():
             }]
         ),
 
-        # Odometry bridge node - DISABLED
-        # Encoders are garbage - SLAM uses LIDAR scan matching for position instead
+        # Wheel odometry bridge - DISABLED
+        # Not needed: SLAM uses minimum_travel thresholds for motion filtering
+        # IMU provides orientation, LIDAR provides position via scan matching
         # Node(
         #     package='bridge_nodes',
         #     executable='odom_bridge',
@@ -62,9 +63,10 @@ def generate_launch_description():
         #         'use_sim_time': use_sim_time,
         #         'backend_url': backend_http_url,
         #         'poll_rate_hz': 20.0,
-        #         'wheel_base_m': 0.085,
+        #         'wheel_base_m': 0.14,
         #         'odom_frame': 'odom',
-        #         'base_frame': 'base_link'
+        #         'base_frame': 'base_link',
+        #         'velocity_only': True
         #     }]
         # ),
 
@@ -95,8 +97,8 @@ def generate_launch_description():
         #     remappings=[('odometry/filtered', 'odom_fused')]
         # ),
 
-        # IMU-based odometry (publishes /odom with IMU orientation, position at origin)
-        # SLAM will provide actual position via map→odom transform based on LIDAR scan matching
+        # IMU odometry bridge - Publishes /odom with IMU orientation + position at origin
+        # Works together with odom_bridge which adds encoder velocity to the same topic
         Node(
             package='bridge_nodes',
             executable='imu_odom_bridge',
@@ -104,6 +106,8 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'use_sim_time': use_sim_time,
+                'backend_url': backend_http_url,
+                'poll_rate_hz': 20.0,
                 'odom_frame': 'odom',
                 'base_frame': 'base_link'
             }]
