@@ -12,6 +12,11 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { useSensors } from "@/components/hooks/useSensors"
 import type { EncoderData, EulerDeg, SensorsStatus, Vector3 } from "@/components/types"
 
@@ -95,21 +100,32 @@ export default function NavigationPanel() {
                 <Radar className="h-4 w-4" /> Distance
               </div>
               <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">ToF distance</span>
+                <span className="text-muted-foreground">Obstacle</span>
                 <span className="font-mono">{obstacleDistanceMm != null ? `${obstacleDistanceMm.toFixed(0)} mm` : "—"}</span>
               </div>
               <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Avg travelled</span>
+                <span className="text-muted-foreground">Cumulative</span>
                 <span className="font-mono">{distAvgMm != null ? `${distAvgMm.toFixed(0)} mm` : "—"}</span>
               </div>
               <div className="flex flex-col gap-1 border-t pt-2 text-sm">
                 <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Last movement</span>
-                  <span className="font-mono">
-                    {data?.last_movement?.avg_mm != null
-                      ? `${data.last_movement.avg_mm.toFixed(0)}mm (${(data.last_movement.avg_mm / 10).toFixed(1)}cm)`
-                      : "—"}
-                  </span>
+                  <span className="text-muted-foreground">Latest</span>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="font-mono cursor-help">
+                        {data?.last_movement?.avg_mm != null
+                          ? `${data.last_movement.avg_mm.toFixed(0)} mm`
+                          : "—"}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <div className="text-xs">
+                        {data?.last_movement?.avg_mm != null
+                          ? `${(data.last_movement.avg_mm / 10).toFixed(1)} cm`
+                          : "No data"}
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
                 </div>
                 {data?.last_movement?.left_mm != null && data?.last_movement?.right_mm != null && (
                   <div className="flex items-center justify-between text-xs text-muted-foreground">

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { Camera, Map as MapIcon, Radar } from "lucide-react"
+import { Camera, Map as MapIcon, Radar, Github } from "lucide-react"
 
 import TopBar from "./TopBar"
 import CameraPanel from "./CameraPanel"
@@ -107,7 +107,18 @@ export default function GordonBotDashboard() {
         </main>
 
         <footer className="mx-auto max-w-7xl px-4 pb-6 pt-2 text-center text-xs text-muted-foreground">
-          Built with React, Tailwind, and shadcn/ui • Keyboard + On-screen controls • Theme persists in localStorage
+          <div className="flex items-center justify-center gap-2">
+            <span>GordonBot Dashboard</span>
+            <a
+              href="https://github.com/keithvassallomt/gordonbot"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+              aria-label="View on GitHub"
+            >
+              <Github className="h-3.5 w-3.5" />
+            </a>
+          </div>
         </footer>
         </div>
         {showCameraOverlay && <CameraOverlay />}

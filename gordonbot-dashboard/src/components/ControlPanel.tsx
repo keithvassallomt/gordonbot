@@ -3,7 +3,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import { Gamepad2 } from "lucide-react"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+import { Gamepad2, Info } from "lucide-react"
 import JoystickPad from "@/components/JoystickPad"
 import KV from "@/components/KV"
 
@@ -122,8 +127,44 @@ export default function ControlPanel({ transport }: { transport: ControlTranspor
   return (
     <Card>
       <CardHeader className="space-y-1">
-        <CardTitle className="flex items-center gap-2 text-base"><Gamepad2 className="h-4 w-4"/> Drive</CardTitle>
-        <p className="text-xs text-muted-foreground">Joystick: 100% analog. Keys: W/S 80% (Shift=100%), A/D 100%. Use creep mode for precision.</p>
+        <div className="flex items-center justify-between">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Gamepad2 className="h-4 w-4"/> Drive
+          </CardTitle>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-6 w-6">
+                <Info className="h-4 w-4 text-muted-foreground" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-xs">
+              <div className="space-y-2 text-xs">
+                <div className="font-semibold">Control Modes</div>
+                <div>
+                  <span className="font-medium">Joystick:</span> 100% analog control
+                </div>
+                <div>
+                  <span className="font-medium">Keyboard:</span> W/S 80% forward/back (Shift = 100%), A/D 100% turn
+                </div>
+                <div>
+                  <span className="font-medium">Creep Mode:</span> Reduced speed for precision control
+                </div>
+                <div className="border-t pt-2 mt-2">
+                  <div className="font-semibold mb-1">Keyboard Controls</div>
+                  <div>W/↑ = Forward</div>
+                  <div>S/↓ = Back</div>
+                  <div>A/← = Turn Left</div>
+                  <div>D/→ = Turn Right</div>
+                  <div>Shift = Boost</div>
+                </div>
+                <div className="border-t pt-2 mt-2">
+                  <div className="font-semibold">Safety</div>
+                  <div>Dead-man timeout: {DEADMAN_MS}ms</div>
+                </div>
+              </div>
+            </TooltipContent>
+          </Tooltip>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-start">
@@ -157,14 +198,6 @@ export default function ControlPanel({ transport }: { transport: ControlTranspor
               )}
             </div>
           </div>
-        </div>
-        <Separator />
-        <div className="grid grid-cols-3 gap-2 text-center text-xs text-muted-foreground">
-          <div>W/↑ Forward</div>
-          <div>S/↓ Back</div>
-          <div>A/← Turn L</div>
-          <div>D/→ Turn R</div>
-          <div className="col-span-3">Shift = Boost • Creep Toggle = Slow Mode • Dead-man {DEADMAN_MS}ms</div>
         </div>
       </CardContent>
     </Card>
