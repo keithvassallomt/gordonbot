@@ -18,6 +18,7 @@ import { useBattery } from "./hooks/useBattery";
 import { useControlTransport } from "./hooks/useControlTransport"
 import { useThemeMode } from "./hooks/useThemeMode"
 import { SlamModeProvider } from "./contexts/SlamModeContext"
+import { CameraStreamProvider } from "./contexts/CameraStreamContext"
 
 import { CONTROL_WS_PATH } from "./config"
 
@@ -61,15 +62,16 @@ export default function GordonBotDashboard() {
   }, [])
 
   return (
-    <SlamModeProvider>
-      <TooltipProvider>
-        <div className="min-h-dvh w-full bg-background text-foreground">
-        <TopBar
-          mode={theme.mode}
-          onModeChange={theme.setMode}
-          transportStatus={transport.status}
-          batteryPercent={battery?.percent}
-        />
+    <CameraStreamProvider autoStart={true}>
+      <SlamModeProvider>
+        <TooltipProvider>
+          <div className="min-h-dvh w-full bg-background text-foreground">
+          <TopBar
+            mode={theme.mode}
+            onModeChange={theme.setMode}
+            transportStatus={transport.status}
+            batteryPercent={battery?.percent}
+          />
 
         <main className="mx-auto max-w-7xl gap-4 px-4 py-4 grid grid-cols-1 lg:grid-cols-5">
           {/* Left: Camera/Map/LIDAR tabs (span 3 cols on desktop) */}
@@ -111,5 +113,6 @@ export default function GordonBotDashboard() {
         {showCameraOverlay && <CameraOverlay />}
       </TooltipProvider>
     </SlamModeProvider>
+    </CameraStreamProvider>
   );
 }

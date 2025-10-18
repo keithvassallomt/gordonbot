@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import { API_BASE } from "@/components/config"
-import type { SlamMapMessage, SlamPoseMessage, TransportStatus } from "@/components/types"
+import type { SlamMapMessage, SlamPoseMessage, LoopClosureEvent, TransportStatus } from "@/components/types"
 
 const SLAM_WS_PATH = "/ws/slam"
 const RECONNECT_INITIAL_MS = 1000
@@ -12,7 +12,7 @@ type PongMessage = {
   ts?: number
 }
 
-type SocketMessage = SlamMapMessage | SlamPoseMessage | PongMessage
+type SocketMessage = SlamMapMessage | SlamPoseMessage | LoopClosureEvent | PongMessage
 
 function resolveWsUrl(path: string) {
   try {
@@ -33,6 +33,7 @@ function resolveWsUrl(path: string) {
 export function useSLAM() {
   const [map, setMap] = useState<SlamMapMessage | null>(null)
   const [pose, setPose] = useState<SlamPoseMessage | null>(null)
+  const [loopClosures, setLoopClosures] = useState<LoopClosureEvent[]>([])
   const [status, setStatus] = useState<TransportStatus>("disconnected")
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [isReconnecting, setIsReconnecting] = useState(false)
@@ -70,6 +71,20 @@ export function useSLAM() {
 
     if ((data as SlamPoseMessage).type === "pose") {
       setPose(data as SlamPoseMessage)
+      setErrorMessage(null)
+      return
+    }
+
+    if ((data as LoopClosureEvent).type === "loop_closure") {
+      const event = data as LoopClosureEvent
+      setLoopClosures((prev) => {
+        // Keep last 50 events
+        const updated = [...prev, event]
+        if (updated.length > 50) {
+          return updated.slice(-50)
+        }
+        return updated
+      })
       setErrorMessage(null)
       return
     }
@@ -154,11 +169,13 @@ export function useSLAM() {
   const clearMapData = useCallback(() => {
     setMap(null)
     setPose(null)
+    setLoopClosures([])
   }, [])
 
   return {
     map,
     pose,
+    loopClosures,
     status,
     errorMessage,
     clearError,

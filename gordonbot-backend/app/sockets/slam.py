@@ -12,8 +12,10 @@ import websockets
 
 log = logging.getLogger(__name__)
 
-from app.schemas import SlamMapMessage, SlamPoseMessage
+from app.schemas import SlamMapMessage, SlamPoseMessage, LoopClosureEvent
 from app.services.map_quality_analyzer import default_analyzer
+import math
+import time
 
 router = APIRouter()
 
@@ -29,9 +31,94 @@ latest_pose_obj: Optional[SlamPoseMessage] = None
 # Map quality analysis
 latest_map_quality: Optional[dict] = None
 
+# Loop closure detection
+previous_pose: Optional[SlamPoseMessage] = None
+previous_pose_time: Optional[float] = None
+loop_closure_events: list[dict] = []  # Recent loop closure events
+MAX_LOOP_EVENTS = 50  # Keep last 50 events
+
 # Connection to map_bridge WebSocket
 map_bridge_ws: Optional[websockets.WebSocketClientProtocol] = None
 map_bridge_task: Optional[asyncio.Task] = None
+
+
+def detect_loop_closure(current_pose: SlamPoseMessage) -> Optional[LoopClosureEvent]:
+    """
+    Detect potential loop closure by analyzing pose corrections.
+
+    Loop closures cause the robot's estimated position to "jump" when SLAM
+    corrects accumulated drift. We detect this by comparing expected pose
+    (based on smooth motion) vs actual pose.
+
+    Returns LoopClosureEvent if a correction is detected, None otherwise.
+    """
+    global previous_pose, previous_pose_time
+
+    current_time = time.time()
+
+    # Need previous pose for comparison
+    if previous_pose is None or previous_pose_time is None:
+        previous_pose = current_pose
+        previous_pose_time = current_time
+        return None
+
+    # Calculate time delta
+    dt = current_time - previous_pose_time
+
+    # Ignore if updates are too close together (< 50ms) or too far apart (> 5s)
+    if dt < 0.05 or dt > 5.0:
+        previous_pose = current_pose
+        previous_pose_time = current_time
+        return None
+
+    # Calculate position change
+    dx = current_pose.x - previous_pose.x
+    dy = current_pose.y - previous_pose.y
+    distance = math.sqrt(dx**2 + dy**2)
+
+    # Calculate angular change
+    dtheta = current_pose.theta - previous_pose.theta
+    # Normalize to [-pi, pi]
+    while dtheta > math.pi:
+        dtheta -= 2 * math.pi
+    while dtheta < -math.pi:
+        dtheta += 2 * math.pi
+
+    # Expected maximum movement based on robot capabilities
+    # GordonBot max speed ~0.3 m/s, so in dt seconds:
+    max_expected_distance = 0.35 * dt  # Add 15% margin
+    max_expected_rotation = 2.0 * dt  # ~115 deg/s max
+
+    # Detect anomalous jumps (likely loop closure corrections)
+    is_position_jump = distance > max_expected_distance and distance > 0.05  # At least 5cm
+    is_rotation_jump = abs(dtheta) > max_expected_rotation and abs(dtheta) > 0.1  # At least ~6 degrees
+
+    # Update previous pose
+    previous_pose = current_pose
+    previous_pose_time = current_time
+
+    # If either position or rotation jumped significantly
+    if is_position_jump or is_rotation_jump:
+        # Determine confidence based on magnitude
+        confidence = "low"
+        if distance > 0.2 or abs(dtheta) > 0.3:  # 20cm or 17 degrees
+            confidence = "medium"
+        if distance > 0.5 or abs(dtheta) > 0.5:  # 50cm or 29 degrees
+            confidence = "high"
+
+        event = LoopClosureEvent(
+            ts=current_pose.ts,
+            x=current_pose.x,
+            y=current_pose.y,
+            correction_distance=distance,
+            correction_angle=abs(dtheta),
+            confidence=confidence
+        )
+
+        log.info(f"Loop closure detected: {distance:.3f}m, {abs(dtheta):.3f}rad ({confidence} confidence)")
+        return event
+
+    return None
 
 
 async def connect_to_map_bridge():
@@ -96,7 +183,22 @@ async def connect_to_map_bridge():
                             except ValidationError as exc:
                                 log.debug("Failed to validate SLAM pose message: %s", exc)
                                 latest_pose_obj = None
-                            # Broadcast to all connected clients
+
+                            # Detect loop closures from pose corrections
+                            if latest_pose_obj is not None:
+                                loop_event = detect_loop_closure(latest_pose_obj)
+                                if loop_event is not None:
+                                    # Add to event history
+                                    global loop_closure_events
+                                    event_dict = loop_event.model_dump()
+                                    loop_closure_events.append(event_dict)
+                                    # Keep only recent events
+                                    if len(loop_closure_events) > MAX_LOOP_EVENTS:
+                                        loop_closure_events = loop_closure_events[-MAX_LOOP_EVENTS:]
+                                    # Broadcast loop closure event
+                                    await broadcast_to_clients(event_dict)
+
+                            # Broadcast pose to all connected clients
                             await broadcast_to_clients(msg)
 
                     except asyncio.TimeoutError:
@@ -153,6 +255,10 @@ async def slam_websocket(websocket: WebSocket) -> None:
             await websocket.send_json(latest_map)
         if latest_pose:
             await websocket.send_json(latest_pose)
+
+        # Send recent loop closure events
+        for event in loop_closure_events:
+            await websocket.send_json(event)
 
         # Listen for client messages (ping/pong)
         while True:

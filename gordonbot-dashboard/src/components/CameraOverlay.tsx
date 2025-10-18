@@ -3,7 +3,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Camera, ChevronDown, ChevronUp, GripVertical } from "lucide-react"
 
-import { useCameraStream } from "./hooks/useCameraStream"
+import { useSharedCameraStream } from "./contexts/CameraStreamContext"
 
 const MIN_WIDTH = 240
 const MIN_HEIGHT = 135
@@ -19,7 +19,7 @@ const clampWithin = (value: number, min: number, max: number) => {
 
 export function CameraOverlay() {
   const {
-    videoRef,
+    registerVideoElement,
     setStreamKind,
     active,
     connecting,
@@ -29,8 +29,9 @@ export function CameraOverlay() {
     initialising,
     whepUrl,
     mjpegUrl,
-  } = useCameraStream()
+  } = useSharedCameraStream()
 
+  const videoRef = useRef<HTMLVideoElement | null>(null)
   const [collapsed, setCollapsed] = useState(false)
   const [position, setPosition] = useState({ x: VIEWPORT_PADDING, y: 120 })
   const [size, setSize] = useState({ width: 320, height: 180 })
@@ -52,6 +53,12 @@ export function CameraOverlay() {
   useEffect(() => {
     collapsedRef.current = collapsed
   }, [collapsed])
+
+  // Register video element with shared stream
+  useEffect(() => {
+    if (!videoRef.current) return
+    return registerVideoElement(videoRef.current)
+  }, [registerVideoElement])
 
   const effectiveSize = useMemo(() => {
     return collapsed

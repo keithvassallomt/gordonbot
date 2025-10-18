@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react"
 import { Badge } from "@/components/ui/badge"
-import { Crosshair, Move, ZoomIn, ZoomOut } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Crosshair, Move, ZoomIn, ZoomOut, CircleDot } from "lucide-react"
 import { useSLAM } from "@/components/hooks/useSLAM"
 import type { SlamMapMessage } from "@/components/types"
 
@@ -25,7 +26,18 @@ export default function MapCanvas({ gotoMode = false, onSelectPoint }: MapCanvas
   const hasUserAdjustedRef = useRef(false)
   const dragRef = useRef<{ dragging: boolean; x: number; y: number }>({ dragging: false, x: 0, y: 0 })
 
-  const { map, pose, status } = useSLAM()
+  // Loop closure visualization toggle (persisted in localStorage)
+  const [showLoopClosures, setShowLoopClosures] = useState(() => {
+    const saved = localStorage.getItem("mapShowLoopClosures")
+    return saved !== null ? saved === "true" : true // Default to enabled
+  })
+
+  const { map, pose, loopClosures, status } = useSLAM()
+
+  // Persist loop closure visibility preference
+  useEffect(() => {
+    localStorage.setItem("mapShowLoopClosures", String(showLoopClosures))
+  }, [showLoopClosures])
 
   const drawSlamMap = useCallback(
     (ctx: CanvasRenderingContext2D, mapData: SlamMapMessage, toCanvasX: (x: number) => number, toCanvasY: (y: number) => number) => {
@@ -58,6 +70,64 @@ export default function MapCanvas({ gotoMode = false, onSelectPoint }: MapCanvas
       }
     },
     [],
+  )
+
+  const drawLoopClosures = useCallback(
+    (ctx: CanvasRenderingContext2D, toCanvasX: (x: number) => number, toCanvasY: (y: number) => number) => {
+      if (!loopClosures || loopClosures.length === 0) return
+
+      const now = Date.now()
+
+      loopClosures.forEach((event) => {
+        const age = now - event.ts // milliseconds
+        const maxAge = 60000 // fade out over 60 seconds
+
+        // Skip events older than maxAge
+        if (age > maxAge) return
+
+        // Calculate opacity based on age (newer = more opaque)
+        const opacity = Math.max(0, 1 - age / maxAge)
+
+        // Color based on confidence
+        let baseColor: string
+        if (event.confidence === "high") {
+          baseColor = "255, 0, 0" // Red
+        } else if (event.confidence === "medium") {
+          baseColor = "255, 165, 0" // Orange
+        } else {
+          baseColor = "255, 255, 0" // Yellow
+        }
+
+        const px = toCanvasX(event.x)
+        const py = toCanvasY(event.y)
+
+        // Draw outer glow (larger, more transparent)
+        ctx.fillStyle = `rgba(${baseColor}, ${opacity * 0.2})`
+        ctx.beginPath()
+        ctx.arc(px, py, 25, 0, 2 * Math.PI)
+        ctx.fill()
+
+        // Draw middle ring
+        ctx.fillStyle = `rgba(${baseColor}, ${opacity * 0.5})`
+        ctx.beginPath()
+        ctx.arc(px, py, 15, 0, 2 * Math.PI)
+        ctx.fill()
+
+        // Draw center dot
+        ctx.fillStyle = `rgba(${baseColor}, ${opacity})`
+        ctx.beginPath()
+        ctx.arc(px, py, 8, 0, 2 * Math.PI)
+        ctx.fill()
+
+        // Draw outline
+        ctx.strokeStyle = `rgba(${baseColor}, ${opacity})`
+        ctx.lineWidth = 2
+        ctx.beginPath()
+        ctx.arc(px, py, 8, 0, 2 * Math.PI)
+        ctx.stroke()
+      })
+    },
+    [loopClosures],
   )
 
   const draw = useCallback(() => {
@@ -106,6 +176,11 @@ export default function MapCanvas({ gotoMode = false, onSelectPoint }: MapCanvas
       drawSlamMap(ctx, map, toCanvasX, toCanvasY)
     }
 
+    // Draw loop closures if enabled (before robot so they appear underneath)
+    if (showLoopClosures) {
+      drawLoopClosures(ctx, toCanvasX, toCanvasY)
+    }
+
     ctx.save()
     ctx.rotate(-robotTheta)  // Negate because IMU is mounted upside down (rotation direction inverted)
     ctx.fillStyle = "#10b981"
@@ -124,7 +199,7 @@ export default function MapCanvas({ gotoMode = false, onSelectPoint }: MapCanvas
     ctx.restore()
 
     ctx.restore()
-  }, [scale, offset, map, pose, drawSlamMap])
+  }, [scale, offset, map, pose, drawSlamMap, drawLoopClosures])
 
   useEffect(() => {
     const canvas = canvasRef.current!
@@ -147,6 +222,17 @@ export default function MapCanvas({ gotoMode = false, onSelectPoint }: MapCanvas
   useEffect(() => {
     draw()
   }, [draw])
+
+  // Redraw continuously when loop closures are present AND enabled (for fade animation)
+  useEffect(() => {
+    if (!showLoopClosures || !loopClosures || loopClosures.length === 0) return
+
+    const interval = setInterval(() => {
+      draw()
+    }, 100) // Update 10 times per second
+
+    return () => clearInterval(interval)
+  }, [showLoopClosures, loopClosures, draw])
 
   useEffect(() => {
     if (!map) {
@@ -272,6 +358,15 @@ export default function MapCanvas({ gotoMode = false, onSelectPoint }: MapCanvas
             Click to target
           </Badge>
         )}
+        <Button
+          size="sm"
+          variant={showLoopClosures ? "default" : "outline"}
+          className="pointer-events-auto h-7 px-2"
+          onClick={() => setShowLoopClosures(!showLoopClosures)}
+          title={showLoopClosures ? "Hide loop closures" : "Show loop closures"}
+        >
+          <CircleDot className="h-3 w-3" />
+        </Button>
       </div>
     </div>
   )

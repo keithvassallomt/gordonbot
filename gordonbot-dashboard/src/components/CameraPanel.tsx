@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Activity, Camera as CameraIcon, Volume2, VolumeX } from "lucide-react"
-import { useCameraStream } from "./hooks/useCameraStream"
+import { useSharedCameraStream } from "./contexts/CameraStreamContext"
 
 /**
  * Camera panel component.
@@ -24,7 +24,7 @@ import { useCameraStream } from "./hooks/useCameraStream"
  */
 export default function CameraPanel() {
   const {
-    videoRef,
+    registerVideoElement,
     startLocalDemo,
     startWebRTC,
     stop,
@@ -39,14 +39,21 @@ export default function CameraPanel() {
     mjpegUrl,
     getCurrentStream,
     hasAudioTrack,
-  } = useCameraStream()
+  } = useSharedCameraStream()
 
+  const videoRef = useRef<HTMLVideoElement | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [audioEnabled, setAudioEnabled] = useState(false)
   const [audioLoading, setAudioLoading] = useState(false)
   const [audioError, setAudioError] = useState<string | null>(null)
 
   const audioButtonDisabled = audioLoading || (!hasAudioTrack && !audioEnabled)
+
+  // Register video element with shared stream
+  useEffect(() => {
+    if (!videoRef.current) return
+    return registerVideoElement(videoRef.current)
+  }, [registerVideoElement])
 
   useEffect(() => {
     const audioEl = audioRef.current
@@ -142,87 +149,89 @@ export default function CameraPanel() {
         <CardTitle className="flex items-center gap-2 text-base">
           <CameraIcon className="h-4 w-4" /> Camera
         </CardTitle>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <Badge variant="default" className="flex items-center gap-1">
-            <Activity className="h-3 w-3" /> Live
-          </Badge>
-          <Badge variant="outline">{streamTech}</Badge>
-          {streamKind === "annotated" && decoderMode && (
-            <Badge
-              className={
-                decoderMode === "hailo"
-                  ? "border-transparent bg-emerald-500 text-white"
-                  : "border-transparent bg-destructive text-white"
-              }
-            >
-              {decoderMode === "hailo" ? "Hailo decode" : "CPU decode"}
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Badge variant="default" className="flex items-center gap-1">
+              <Activity className="h-3 w-3" /> Live
             </Badge>
-          )}
-          <div className="flex items-center gap-1 rounded-md border px-2 py-1 text-xs">
-            <label className="mr-1">Stream</label>
-            <select
-              className="bg-transparent outline-none"
-              value={streamKind}
-              onChange={(event) => {
-                const next = event.target.value as typeof streamKind
-                setStreamKind(next)
-              }}
-            >
-              <option value="raw">Raw</option>
-              <option value="annotated">Annotated</option>
-            </select>
-          </div>
-          <div className="flex gap-2">
-            {whepUrl ? (
-              !active ? (
-                <Button size="sm" onClick={() => { void startWebRTC() }} disabled={connecting}>
-                  {connecting ? "Connecting..." : "Connect"}
-                </Button>
+            <Badge variant="outline">{streamTech}</Badge>
+            {streamKind === "annotated" && decoderMode && (
+              <Badge
+                className={
+                  decoderMode === "hailo"
+                    ? "border-transparent bg-emerald-500 text-white"
+                    : "border-transparent bg-destructive text-white"
+                }
+              >
+                {decoderMode === "hailo" ? "Hailo decode" : "CPU decode"}
+              </Badge>
+            )}
+            <div className="flex items-center gap-1 rounded-md border px-2 py-1 text-xs">
+              <label className="mr-1">Stream</label>
+              <select
+                className="bg-transparent outline-none"
+                value={streamKind}
+                onChange={(event) => {
+                  const next = event.target.value as typeof streamKind
+                  setStreamKind(next)
+                }}
+              >
+                <option value="raw">Raw</option>
+                <option value="annotated">Annotated</option>
+              </select>
+            </div>
+            <div className="flex gap-2">
+              {whepUrl ? (
+                !active ? (
+                  <Button size="sm" onClick={() => { void startWebRTC() }} disabled={connecting}>
+                    {connecting ? "Connecting..." : "Connect"}
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="secondary" onClick={() => { void stop() }}>
+                    Disconnect
+                  </Button>
+                )
               ) : (
-                <Button size="sm" variant="secondary" onClick={() => { void stop() }}>
-                  Disconnect
-                </Button>
-              )
-            ) : (
-              !active ? (
-                <Button size="sm" onClick={() => { void startLocalDemo() }}>
-                  Demo Connect
-                </Button>
-              ) : (
-                <Button size="sm" variant="secondary" onClick={() => { void stop() }}>
-                  Stop
-                </Button>
-              )
+                !active ? (
+                  <Button size="sm" onClick={() => { void startLocalDemo() }}>
+                    Demo Connect
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="secondary" onClick={() => { void stop() }}>
+                    Stop
+                  </Button>
+                )
+              )}
+            </div>
+            {whepUrl && (
+              <Button
+                size="sm"
+                variant={audioEnabled ? "default" : "outline"}
+                onClick={() => { void handleToggleAudio() }}
+                disabled={audioButtonDisabled}
+              >
+                {audioLoading ? (
+                  "Audio…"
+                ) : (
+                  <>
+                    {audioEnabled ? <VolumeX className="mr-1 h-4 w-4" /> : <Volume2 className="mr-1 h-4 w-4" />}
+                    {audioEnabled ? "Mute audio" : "Hear audio"}
+                  </>
+                )}
+              </Button>
+            )}
+            {!hasAudioTrack && whepUrl && !audioEnabled && !audioError && (
+              <div className="flex items-center text-muted-foreground">
+                <VolumeX className="h-3.5 w-3.5 opacity-60" aria-hidden="true" />
+              </div>
             )}
           </div>
-          {whepUrl && (
-            <Button
-              size="sm"
-              variant={audioEnabled ? "default" : "outline"}
-              onClick={() => { void handleToggleAudio() }}
-              disabled={audioButtonDisabled}
-            >
-              {audioLoading ? (
-                "Audio…"
-              ) : (
-                <>
-                  {audioEnabled ? <VolumeX className="mr-1 h-4 w-4" /> : <Volume2 className="mr-1 h-4 w-4" />}
-                  {audioEnabled ? "Mute audio" : "Hear audio"}
-                </>
-              )}
-            </Button>
+          {audioError && (
+            <div className="w-full text-right text-xs text-destructive">
+              {audioError}
+            </div>
           )}
         </div>
-        {!hasAudioTrack && whepUrl && !audioEnabled && !audioError && (
-          <div className="flex w-full justify-end text-muted-foreground">
-            <VolumeX className="h-3.5 w-3.5 opacity-60" aria-hidden="true" />
-          </div>
-        )}
-        {audioError && (
-          <div className="w-full text-right text-xs text-destructive">
-            {audioError}
-          </div>
-        )}
       </CardHeader>
       <CardContent>
         <div className={`${containerClass} w-full overflow-hidden rounded-lg border bg-black relative`}>

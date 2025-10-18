@@ -159,4 +159,14 @@ export type SlamPoseMessage = {
   frame_id: string
 }
 
-export type SlamMessage = SlamMapMessage | SlamPoseMessage
+export type LoopClosureEvent = {
+  type: "loop_closure"
+  ts: number // milliseconds
+  x: number // meters - position where correction occurred
+  y: number // meters - position where correction occurred
+  correction_distance: number // meters - magnitude of position correction
+  correction_angle: number // radians - magnitude of angular correction
+  confidence: "low" | "medium" | "high" // confidence level
+}
+
+export type SlamMessage = SlamMapMessage | SlamPoseMessage | LoopClosureEvent

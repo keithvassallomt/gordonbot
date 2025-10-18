@@ -187,6 +187,17 @@ class SlamGoToPointRequest(BaseModel):
     )
 
 
+class LoopClosureEvent(BaseModel):
+    """Loop closure or pose correction event."""
+    type: str = Field(default="loop_closure", description="Message type")
+    ts: int = Field(description="Timestamp in milliseconds")
+    x: float = Field(description="X position where correction occurred (meters)")
+    y: float = Field(description="Y position where correction occurred (meters)")
+    correction_distance: float = Field(description="Distance of pose correction (meters)")
+    correction_angle: float = Field(description="Angular correction (radians)")
+    confidence: str = Field(description="Confidence level: low, medium, high")
+
+
 class LidarStatus(BaseModel):
     connected: bool
     running: bool
