@@ -20,10 +20,12 @@ class ImuOdomBridge(Node):
         # Declare parameters
         self.declare_parameter('odom_frame', 'odom')
         self.declare_parameter('base_frame', 'base_link')
+        self.declare_parameter('encoder_odom_topic', '/odom_encoders')
 
         # Get parameters
         self.odom_frame = self.get_parameter('odom_frame').value
         self.base_frame = self.get_parameter('base_frame').value
+        self.encoder_odom_topic = self.get_parameter('encoder_odom_topic').value
 
         # Publisher and broadcaster
         self.odom_pub = self.create_publisher(Odometry, '/odom', 10)
@@ -37,15 +39,32 @@ class ImuOdomBridge(Node):
             10
         )
 
-        # State - track IMU and cumulative heading
+        # Subscribe to encoder odometry for velocity data
+        self.encoder_odom_sub = self.create_subscription(
+            Odometry,
+            self.encoder_odom_topic,
+            self._encoder_odom_callback,
+            10
+        )
+
+        # State - track IMU, encoder data, and cumulative heading
         self.latest_imu = None
+        self.latest_encoder_velocity = None  # Store latest encoder linear velocity
+        self.latest_encoder_position = None  # Store latest encoder position (x, y)
         self.theta = 0.0  # Cumulative heading for motion detection
         self.prev_time = None
 
         self.get_logger().info(f'IMU Odometry Bridge started')
-        self.get_logger().info(f'Publishing odometry with IMU orientation and cumulative heading')
-        self.get_logger().info(f'Position stays at origin - SLAM handles position via scan matching')
+        self.get_logger().info(f'Subscribing to {self.encoder_odom_topic} for encoder data')
+        self.get_logger().info(f'Merging encoder position + velocity with IMU orientation')
+        self.get_logger().info(f'Publishing merged odometry to /odom')
+        self.get_logger().info(f'Position from encoders (will drift), orientation from IMU')
         self.get_logger().info(f'Cumulative heading allows SLAM to detect rotation for motion filtering')
+
+    def _encoder_odom_callback(self, msg):
+        """Callback for encoder odometry messages - extract velocity and position."""
+        self.latest_encoder_velocity = msg.twist.twist.linear
+        self.latest_encoder_position = msg.pose.pose.position
 
     def _imu_callback(self, msg):
         """Callback for IMU messages."""
@@ -85,10 +104,14 @@ class ImuOdomBridge(Node):
         odom.header.frame_id = self.odom_frame
         odom.child_frame_id = self.base_frame
 
-        # Position: origin (SLAM handles actual position via map→odom TF)
-        odom.pose.pose.position.x = 0.0
-        odom.pose.pose.position.y = 0.0
-        odom.pose.pose.position.z = 0.0
+        # Position: from encoders (will drift over time, SLAM corrects via scan matching)
+        if self.latest_encoder_position is not None:
+            odom.pose.pose.position = self.latest_encoder_position
+        else:
+            # Fallback: no encoder position yet, use origin
+            odom.pose.pose.position.x = 0.0
+            odom.pose.pose.position.y = 0.0
+            odom.pose.pose.position.z = 0.0
 
         rotated = self._rotate_quaternion_z(
             self.latest_imu.orientation.x,
@@ -102,29 +125,42 @@ class ImuOdomBridge(Node):
         odom.pose.pose.orientation.z = rotated[2]
         odom.pose.pose.orientation.w = rotated[3]
 
-        # Velocity: angular velocity from IMU, no linear velocity
-        odom.twist.twist.linear.x = 0.0
-        odom.twist.twist.linear.y = 0.0
-        odom.twist.twist.linear.z = 0.0
+        # Velocity: merge encoder linear velocity with IMU angular velocity
+        if self.latest_encoder_velocity is not None:
+            # Use encoder linear velocity
+            odom.twist.twist.linear = self.latest_encoder_velocity
+        else:
+            # Fallback: no encoder data yet, use zeros
+            odom.twist.twist.linear.x = 0.0
+            odom.twist.twist.linear.y = 0.0
+            odom.twist.twist.linear.z = 0.0
         odom.twist.twist.angular = self.latest_imu.angular_velocity
 
-        # Covariance: IMU orientation is accurate, position unknown
-        odom.pose.covariance[0] = 1e9   # x - infinite (unknown)
-        odom.pose.covariance[7] = 1e9   # y - infinite (unknown)
+        # Covariance: encoder position has moderate uncertainty, IMU orientation is accurate
+        odom.pose.covariance[0] = 0.1   # x - moderate uncertainty (~10cm, encoders drift)
+        odom.pose.covariance[7] = 0.1   # y - moderate uncertainty (~10cm, encoders drift)
         odom.pose.covariance[35] = 0.01 # yaw - low covariance (accurate from IMU)
 
         # Publish odometry
         self.odom_pub.publish(odom)
 
         # Broadcast TF: odom → base_link
-        # Position at origin, but rotation uses cumulative theta for motion detection
+        # Position from encoders, rotation uses cumulative theta for motion detection
         t = TransformStamped()
         t.header.stamp = now.to_msg()
         t.header.frame_id = self.odom_frame
         t.child_frame_id = self.base_frame
-        t.transform.translation.x = 0.0
-        t.transform.translation.y = 0.0
-        t.transform.translation.z = 0.0
+
+        # Use encoder position (same as in odometry message)
+        if self.latest_encoder_position is not None:
+            t.transform.translation.x = self.latest_encoder_position.x
+            t.transform.translation.y = self.latest_encoder_position.y
+            t.transform.translation.z = self.latest_encoder_position.z
+        else:
+            # Fallback: no encoder position yet
+            t.transform.translation.x = 0.0
+            t.transform.translation.y = 0.0
+            t.transform.translation.z = 0.0
 
         # Use cumulative theta (from angular velocity integration) for TF
         # This allows SLAM's minimum_travel_heading to detect rotation

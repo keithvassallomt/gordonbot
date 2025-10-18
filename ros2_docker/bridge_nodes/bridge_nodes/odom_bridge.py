@@ -29,6 +29,7 @@ class OdomBridge(Node):
         self.declare_parameter('odom_frame', 'odom')
         self.declare_parameter('base_frame', 'base_link')
         self.declare_parameter('velocity_only', True)  # NEW: velocity-only mode
+        self.declare_parameter('odom_topic', '/odom')  # Configurable output topic
 
         # Get parameters
         self.backend_url = self.get_parameter('backend_url').value
@@ -37,9 +38,10 @@ class OdomBridge(Node):
         self.odom_frame = self.get_parameter('odom_frame').value
         self.base_frame = self.get_parameter('base_frame').value
         self.velocity_only = self.get_parameter('velocity_only').value
+        self.odom_topic = self.get_parameter('odom_topic').value
 
         # Publisher and broadcaster
-        self.odom_pub = self.create_publisher(Odometry, '/odom', 10)
+        self.odom_pub = self.create_publisher(Odometry, self.odom_topic, 10)
         self.tf_broadcaster = TransformBroadcaster(self)
 
         # Odometry state (position/orientation always at origin in velocity-only mode)
@@ -58,6 +60,7 @@ class OdomBridge(Node):
 
         mode = "velocity-only (motion detection)" if self.velocity_only else "full odometry"
         self.get_logger().info(f'Odometry bridge starting in {mode} mode')
+        self.get_logger().info(f'Publishing encoder odometry to {self.odom_topic}')
         self.get_logger().info(f'Polling {self.backend_url}/api/sensors at {self.poll_rate}Hz')
 
         # Start polling thread

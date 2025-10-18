@@ -119,11 +119,18 @@ export type BNO055Data = {
 
 export type ToFData = { distance_mm?: number }
 
+export type LastMovement = {
+  left_mm?: number
+  right_mm?: number
+  avg_mm?: number
+}
+
 export type SensorsStatus = {
   ts: number
   encoders?: MotorEncoders
   tof?: ToFData
   bno055?: BNO055Data
+  last_movement?: LastMovement
 }
 
 // SLAM domain

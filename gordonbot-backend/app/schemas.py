@@ -92,11 +92,18 @@ class BNO055Data(BaseModel):
 class ToFData(BaseModel):
     distance_mm: Optional[int] = None
 
+class LastMovement(BaseModel):
+    """Distance traveled during the last completed movement."""
+    left_mm: Optional[float] = None
+    right_mm: Optional[float] = None
+    avg_mm: Optional[float] = None
+
 class SensorsStatus(BaseModel):
     ts: int
     encoders: Optional[MotorEncoders] = None
     tof: Optional[ToFData] = None
     bno055: Optional[BNO055Data] = None
+    last_movement: Optional[LastMovement] = None
 
 
 class OrientationFrame(BaseModel):

@@ -51,24 +51,25 @@ def generate_launch_description():
             }]
         ),
 
-        # Wheel odometry bridge - DISABLED
-        # Not needed: SLAM uses minimum_travel thresholds for motion filtering
-        # IMU provides orientation, LIDAR provides position via scan matching
-        # Node(
-        #     package='bridge_nodes',
-        #     executable='odom_bridge',
-        #     name='odom_bridge',
-        #     output='screen',
-        #     parameters=[{
-        #         'use_sim_time': use_sim_time,
-        #         'backend_url': backend_http_url,
-        #         'poll_rate_hz': 20.0,
-        #         'wheel_base_m': 0.14,
-        #         'odom_frame': 'odom',
-        #         'base_frame': 'base_link',
-        #         'velocity_only': True
-        #     }]
-        # ),
+        # Wheel odometry bridge - Provides encoder position and velocity
+        # FULL ODOMETRY MODE: Integrates encoder velocity into position (uses IMU for orientation)
+        # Publishes to /odom_encoders (merged with IMU orientation by imu_odom_bridge)
+        Node(
+            package='bridge_nodes',
+            executable='odom_bridge',
+            name='odom_bridge',
+            output='screen',
+            parameters=[{
+                'use_sim_time': use_sim_time,
+                'backend_url': backend_http_url,
+                'poll_rate_hz': 20.0,
+                'wheel_base_m': 0.14,
+                'odom_frame': 'odom',
+                'base_frame': 'base_link',
+                'velocity_only': False,
+                'odom_topic': '/odom_encoders'
+            }]
+        ),
 
         # IMU bridge node
         Node(
@@ -97,8 +98,9 @@ def generate_launch_description():
         #     remappings=[('odometry/filtered', 'odom_fused')]
         # ),
 
-        # IMU odometry bridge - Publishes /odom with IMU orientation + position at origin
-        # Works together with odom_bridge which adds encoder velocity to the same topic
+        # IMU odometry bridge - Merges encoder velocity with IMU orientation
+        # Subscribes to /odom_encoders (encoder velocity), publishes to /odom (merged data)
+        # SLAM gets: encoder velocity (for motion filtering) + IMU orientation (for rotation)
         Node(
             package='bridge_nodes',
             executable='imu_odom_bridge',
@@ -109,7 +111,8 @@ def generate_launch_description():
                 'backend_url': backend_http_url,
                 'poll_rate_hz': 20.0,
                 'odom_frame': 'odom',
-                'base_frame': 'base_link'
+                'base_frame': 'base_link',
+                'encoder_odom_topic': '/odom_encoders'
             }]
         ),
 
@@ -123,7 +126,7 @@ def generate_launch_description():
 
         # SLAM Toolbox (async mode)
         # Uses LIDAR scan matching for position, IMU (via /odom) for orientation
-        # NO ENCODERS!
+        # Encoders provide velocity for motion filtering (minimum_travel_distance)
         # Mode and map file are determined at launch time based on saved map existence
         Node(
             package='slam_toolbox',

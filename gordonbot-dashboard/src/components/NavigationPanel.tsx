@@ -102,6 +102,22 @@ export default function NavigationPanel() {
                 <span className="text-muted-foreground">Avg travelled</span>
                 <span className="font-mono">{distAvgMm != null ? `${distAvgMm.toFixed(0)} mm` : "—"}</span>
               </div>
+              <div className="flex flex-col gap-1 border-t pt-2 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Last movement</span>
+                  <span className="font-mono">
+                    {data?.last_movement?.avg_mm != null
+                      ? `${data.last_movement.avg_mm.toFixed(0)}mm (${(data.last_movement.avg_mm / 10).toFixed(1)}cm)`
+                      : "—"}
+                  </span>
+                </div>
+                {data?.last_movement?.left_mm != null && data?.last_movement?.right_mm != null && (
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span className="ml-4">L: {data.last_movement.left_mm.toFixed(0)}mm</span>
+                    <span>R: {data.last_movement.right_mm.toFixed(0)}mm</span>
+                  </div>
+                )}
+              </div>
             </div>
             <div className="flex flex-col gap-3 rounded-md border p-3">
               <div className="flex items-center gap-2 text-muted-foreground">

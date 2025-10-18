@@ -8,6 +8,7 @@ import MapCanvas from "./MapCanvas"
 import ScanQualityPanel from "./ScanQualityPanel"
 import { API_BASE } from "@/components/config"
 import { useSlamMode } from "./contexts/SlamModeContext"
+import type { SensorsStatus } from "./types"
 
 interface GoToToast {
   text: string
@@ -25,6 +26,8 @@ interface GoToState {
 }
 
 const GO_TO_STATUS_POLL_MS = 1000
+const SENSORS_POLL_MS = 200 // 5Hz polling for movement detection
+const MOVEMENT_THRESHOLD_MM_S = 10 // 10mm/s = 1cm/s minimum to show movement
 
 export default function SlamMapPanel() {
   const { speedMode, setSpeedMode } = useSlamMode()
@@ -34,7 +37,21 @@ export default function SlamMapPanel() {
   const [goToStatus, setGoToStatus] = useState<GoToState | null>(null)
   const [toast, setToast] = useState<GoToToast | null>(null)
   const [qualityOpen, setQualityOpen] = useState(false)
+  const [sensorsData, setSensorsData] = useState<SensorsStatus | null>(null)
   const statusTimerRef = useRef<number | null>(null)
+  const sensorsTimerRef = useRef<number | null>(null)
+
+  const fetchSensorsData = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/sensors`)
+      if (response.ok) {
+        const data = (await response.json()) as SensorsStatus
+        setSensorsData(data)
+      }
+    } catch {
+      // Silently fail - movement detection is non-critical
+    }
+  }, [])
 
   const fetchGoToStatus = useCallback(async (quiet = false) => {
     try {
@@ -66,6 +83,16 @@ export default function SlamMapPanel() {
       }
     }
   }, [fetchGoToStatus])
+
+  useEffect(() => {
+    fetchSensorsData()
+    sensorsTimerRef.current = window.setInterval(fetchSensorsData, SENSORS_POLL_MS)
+    return () => {
+      if (sensorsTimerRef.current !== null) {
+        window.clearInterval(sensorsTimerRef.current)
+      }
+    }
+  }, [fetchSensorsData])
 
   useEffect(() => {
     if (!toast) return
@@ -165,10 +192,25 @@ export default function SlamMapPanel() {
     return null
   }, [goToStatus])
 
+  const isMoving = useMemo(() => {
+    if (!sensorsData?.encoders) return false
+    const leftSpeed = Math.abs(sensorsData.encoders.left?.speed_mm_s ?? 0)
+    const rightSpeed = Math.abs(sensorsData.encoders.right?.speed_mm_s ?? 0)
+    const maxSpeed = Math.max(leftSpeed, rightSpeed)
+    return maxSpeed >= MOVEMENT_THRESHOLD_MM_S
+  }, [sensorsData])
+
   return (
     <Card className="w-full">
       <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <CardTitle className="text-base">SLAM Map</CardTitle>
+        <div className="flex items-center gap-2">
+          <CardTitle className="text-base">SLAM Map</CardTitle>
+          {isMoving && (
+            <Badge variant="default" className="bg-green-500 hover:bg-green-600">
+              Moving
+            </Badge>
+          )}
+        </div>
         <div className="flex flex-wrap gap-2">
           <Button
             size="sm"

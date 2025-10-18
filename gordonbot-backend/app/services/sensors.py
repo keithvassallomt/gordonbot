@@ -10,11 +10,13 @@ from app.schemas import (
     EncoderData,
     ToFData,
     BNO055Data,
+    LastMovement,
 )
 from app.core.config import settings
 from app.services.encoder import get_left_encoder, get_right_encoder
 from app.services.tof import read_distance_mm
 from app.services.bno055 import read_bno055
+from app.services.movement_tracker import get_movement_tracker
 
 log = logging.getLogger(__name__)
 
@@ -97,4 +99,15 @@ def get_sensor_status() -> SensorsStatus:
         log.debug("BNO055 read failed: %s", e)
         bno = None
 
-    return SensorsStatus(ts=ts_ms, encoders=encoders, tof=tof, bno055=bno)
+    # Last movement tracking
+    last_movement: Optional[LastMovement] = None
+    try:
+        tracker = get_movement_tracker()
+        movement_data = tracker.get_last_movement()
+        last_movement = LastMovement(**movement_data)
+    except Exception as e:
+        log.debug("Movement tracker read failed: %s", e)
+
+    return SensorsStatus(
+        ts=ts_ms, encoders=encoders, tof=tof, bno055=bno, last_movement=last_movement
+    )
