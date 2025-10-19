@@ -59,6 +59,41 @@ async def stop_raw_stream(request: Request) -> dict[str, object]:
     return {"stopped": True, "already_stopped": False}
 
 
+@router.get("/video/whep/{stream}/ready", tags=["video"])
+async def whep_stream_ready(stream: str) -> dict[str, bool]:
+    """Check if a WHEP stream is ready and available from MediaMTX.
+
+    Returns:
+        - ready: True if the stream is available, False otherwise
+    """
+    base = getattr(settings, "mediamtx_whep_base", None) or "http://127.0.0.1:8889/whep"
+    style = getattr(settings, "mediamtx_whep_style", "prefix").lower()
+    base_clean = base.rstrip("/")
+
+    # Construct the target URL
+    if style == "suffix":
+        if base_clean.endswith("/whep"):
+            base_root = base_clean[: -len("/whep")] or base_clean
+            target = f"{base_root}/{stream}/whep"
+        else:
+            target = f"{base_clean}/{stream}/whep"
+    else:  # prefix (default)
+        if base_clean.endswith("/whep"):
+            target = f"{base_clean}/{stream}"
+        else:
+            target = f"{base_clean}/whep/{stream}"
+
+    # Send an OPTIONS request to check if the stream exists
+    req = urllib.request.Request(target, method="OPTIONS")
+    try:
+        with urllib.request.urlopen(req, timeout=2) as resp:  # nosec B310
+            return {"ready": resp.status < 400}
+    except urllib.error.HTTPError as e:
+        return {"ready": False}
+    except Exception:
+        return {"ready": False}
+
+
 @router.post("/video/whep/{stream}", tags=["video"])
 async def whep_offer(stream: str, request: Request) -> Response:
     """Proxy a WHEP offer to MediaMTX to avoid CORS.

@@ -53,6 +53,8 @@ export interface CameraStreamState extends CameraStreamControls {
   mediaStream: MediaStream | null
   getCurrentStream: () => MediaStream | null
   hasAudioTrack: boolean
+  connectionAttempt: number
+  waitingForStream: boolean
 }
 
 export function useCameraStream(options: UseCameraStreamOptions = {}): CameraStreamState {
@@ -76,6 +78,8 @@ export function useCameraStream(options: UseCameraStreamOptions = {}): CameraStr
   const [initialising, setInitialising] = useState(true)
   const [mediaStream, setMediaStream] = useState<MediaStream | null>(null)
   const [hasAudioTrack, setHasAudioTrack] = useState(false)
+  const [connectionAttempt, setConnectionAttempt] = useState(0)
+  const [waitingForStream, setWaitingForStream] = useState(false)
   const streamRef = useRef<MediaStream | null>(null)
 
   const updateMediaStream = useCallback((stream: MediaStream | null) => {
@@ -175,6 +179,19 @@ export function useCameraStream(options: UseCameraStreamOptions = {}): CameraStr
     [stopRawFeed, updateMediaStream],
   )
 
+  const checkStreamReady = useCallback(async (streamName: string): Promise<boolean> => {
+    try {
+      const response = await fetch(`${API_BASE}/api/video/whep/${streamName}/ready`, {
+        cache: "no-store"
+      })
+      if (!response.ok) return false
+      const data: { ready?: boolean } = await response.json()
+      return data.ready === true
+    } catch {
+      return false
+    }
+  }, [])
+
   const startWebRTC = useCallback(
     async ({ auto = false }: { auto?: boolean } = {}) => {
       if (!whepUrl) return false
@@ -187,6 +204,19 @@ export function useCameraStream(options: UseCameraStreamOptions = {}): CameraStr
         setInitialising(false)
       }
       setConnecting(true)
+
+      // Check if stream is ready before attempting connection
+      const streamName = streamKind === "annotated" ? VIDEO_WHEP_STREAM_ANNOT : VIDEO_WHEP_STREAM_RAW
+      const ready = await checkStreamReady(streamName)
+      if (!ready) {
+        setWaitingForStream(true)
+        setConnecting(false)
+        if (auto) {
+          setInitialising(true)
+        }
+        return false
+      }
+
       try {
         await ensureRawFeed()
         const pc = new RTCPeerConnection()
@@ -245,7 +275,10 @@ export function useCameraStream(options: UseCameraStreamOptions = {}): CameraStr
           headers: { "Content-Type": "application/sdp" },
           body: local.sdp || "",
         })
-        if (!response.ok) throw new Error(`WHEP POST failed: ${response.status}`)
+
+        if (!response.ok) {
+          throw new Error(`WHEP POST failed: ${response.status}`)
+        }
 
         const answerSdp = await response.text()
         await pc.setRemoteDescription({ type: "answer", sdp: answerSdp })
@@ -259,6 +292,8 @@ export function useCameraStream(options: UseCameraStreamOptions = {}): CameraStr
           setRawFeedActive(true)
         }
         setInitialising(false)
+        setWaitingForStream(false)
+        setConnectionAttempt(0)
         return true
       } catch (error) {
         try {
@@ -273,12 +308,16 @@ export function useCameraStream(options: UseCameraStreamOptions = {}): CameraStr
           setInitialising(true)
         }
         updateMediaStream(null)
+        // Don't log 404 errors - they're expected when stream is starting up
+        if (error instanceof Error && !error.message.includes('404')) {
+          console.debug('WebRTC connection failed:', error.message)
+        }
         return false
       } finally {
         setConnecting(false)
       }
     },
-    [ensureRawFeed, streamKind, updateMediaStream, whepUrl],
+    [ensureRawFeed, streamKind, updateMediaStream, whepUrl, checkStreamReady],
   )
 
   useEffect(() => {
@@ -325,6 +364,7 @@ export function useCameraStream(options: UseCameraStreamOptions = {}): CameraStr
         if (cancelled || pcRef.current) {
           return
         }
+        setConnectionAttempt((prev) => prev + 1)
         const success = await startWebRTC({ auto: true })
         if (!success && !cancelled) {
           scheduleAttempt(autoRetryDelayMs)
@@ -374,5 +414,7 @@ export function useCameraStream(options: UseCameraStreamOptions = {}): CameraStr
     mediaStream,
     getCurrentStream,
     hasAudioTrack,
+    connectionAttempt,
+    waitingForStream,
   }
 }

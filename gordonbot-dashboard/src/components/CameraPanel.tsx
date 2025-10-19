@@ -39,6 +39,8 @@ export default function CameraPanel() {
     mjpegUrl,
     getCurrentStream,
     hasAudioTrack,
+    connectionAttempt,
+    waitingForStream,
   } = useSharedCameraStream()
 
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -252,9 +254,16 @@ export default function CameraPanel() {
           {(whepUrl && (initialising || connecting)) && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/60 text-white">
               <div className="h-9 w-9 animate-spin rounded-full border-2 border-white/40 border-t-transparent" />
-              <p className="text-sm font-medium">
-                {initialising ? "Initialising camera feed" : "Connecting to camera"}
-              </p>
+              <div className="flex flex-col items-center gap-1">
+                <p className="text-sm font-medium">
+                  {waitingForStream ? "Waiting for stream" : initialising ? "Initialising camera feed" : "Connecting to camera"}
+                </p>
+                {waitingForStream && connectionAttempt > 0 && (
+                  <p className="text-xs text-white/70">
+                    Attempt {connectionAttempt}
+                  </p>
+                )}
+              </div>
             </div>
           )}
         </div>
