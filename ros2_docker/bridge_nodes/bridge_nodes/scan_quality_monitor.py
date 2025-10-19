@@ -66,6 +66,7 @@ class ScanQualityMonitor(Node):
         self.declare_parameter('max_allowed_gap', 45.0)
         self.declare_parameter('expected_scan_rate', 10.0)
         self.declare_parameter('report_rate_hz', 1.0)
+        self.declare_parameter('enable_monitoring', False)
 
         # Get parameters
         self.ws_port = self.get_parameter('ws_port').value
@@ -76,6 +77,10 @@ class ScanQualityMonitor(Node):
         self.max_allowed_gap = self.get_parameter('max_allowed_gap').value
         self.expected_scan_rate = self.get_parameter('expected_scan_rate').value
         self.report_rate = self.get_parameter('report_rate_hz').value
+        self.enable_monitoring = self.get_parameter('enable_monitoring').value
+
+        # Add parameter callback for runtime toggling
+        self.add_on_set_parameters_callback(self._parameter_callback)
 
         # Subscribe to scan topic
         self.scan_sub = self.create_subscription(
@@ -111,8 +116,27 @@ class ScanQualityMonitor(Node):
         self.ws_thread = threading.Thread(target=self._run_websocket_server, daemon=True)
         self.ws_thread.start()
 
+    def _parameter_callback(self, params):
+        """Handle parameter changes at runtime."""
+        from rcl_interfaces.msg import SetParametersResult
+
+        for param in params:
+            if param.name == 'enable_monitoring':
+                old_value = self.enable_monitoring
+                self.enable_monitoring = param.value
+                if old_value != self.enable_monitoring:
+                    self.get_logger().info(
+                        f'Monitoring {"enabled" if self.enable_monitoring else "disabled"}'
+                    )
+
+        return SetParametersResult(successful=True)
+
     def _scan_callback(self, msg: LaserScan):
         """Callback for scan topic - analyze quality."""
+        # Skip analysis if monitoring is disabled
+        if not self.enable_monitoring:
+            return
+
         current_time = datetime.now().timestamp()
 
         # Extract scan data

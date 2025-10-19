@@ -37,6 +37,7 @@ type cfg struct {
 	apiHost          string
 	backendAccessLog bool
 	backendLogLevel  string
+	backendReload    bool
 }
 
 type persistedState struct {
@@ -194,6 +195,7 @@ func loadCfg() cfg {
 		apiHost:          getenv("GORDONMON_API_HOST", "127.0.0.1"),
 		backendAccessLog: getenvBool("GORDONMON_BACKEND_ACCESS_LOG", false),
 		backendLogLevel:  selectedLevel,
+		backendReload:    getenvBool("GORDONMON_BACKEND_RELOAD", false),
 	}
 }
 
@@ -202,7 +204,10 @@ func backendUvicornCommand(c cfg) string {
 	if level == "" {
 		level = "info"
 	}
-	cmd := fmt.Sprintf("uvicorn app.main:app --host 0.0.0.0 --port %d --reload --log-level %s", c.backendPort, level)
+	cmd := fmt.Sprintf("uvicorn app.main:app --host 0.0.0.0 --port %d --log-level %s", c.backendPort, level)
+	if c.backendReload {
+		cmd += " --reload"
+	}
 	if !c.backendAccessLog {
 		cmd += " --no-access-log"
 	}

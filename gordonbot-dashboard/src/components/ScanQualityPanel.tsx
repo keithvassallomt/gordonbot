@@ -1,6 +1,7 @@
 import React from "react"
-import { AlertCircle, CheckCircle, AlertTriangle, XCircle, Activity } from "lucide-react"
+import { AlertCircle, CheckCircle, AlertTriangle, XCircle, Activity, Play, Pause } from "lucide-react"
 import { useScanQuality, type QualityLevel } from "@/components/hooks/useScanQuality"
+import { Button } from "@/components/ui/button"
 
 const QUALITY_COLORS: Record<QualityLevel, { bg: string; text: string; icon: React.ReactNode }> = {
   excellent: {
@@ -31,15 +32,40 @@ const QUALITY_COLORS: Record<QualityLevel, { bg: string; text: string; icon: Rea
 }
 
 export default function ScanQualityPanel() {
-  const { quality, status } = useScanQuality()
+  const { quality, status, monitoringEnabled, toggleMonitoring } = useScanQuality()
 
-  if (status !== "connected" || !quality || quality.status !== "ok" || !quality.latest) {
+  // Show toggle button and paused message when monitoring is disabled
+  if (!monitoringEnabled || status !== "connected" || !quality || quality.status !== "ok" || !quality.latest) {
     return (
-      <div className="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground">
-        <Activity className="mx-auto mb-2 h-5 w-5 opacity-50" />
-        {status === "connecting" && "Connecting to scan quality monitor..."}
-        {status === "disconnected" && "Scan quality monitor disconnected"}
-        {status === "connected" && quality?.status === "no_data" && "Waiting for scan data..."}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="text-sm font-medium text-muted-foreground">Scan Quality</div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={toggleMonitoring}
+            className="h-7 gap-1.5 px-2"
+          >
+            {monitoringEnabled ? (
+              <>
+                <Pause className="h-3.5 w-3.5" />
+                <span className="text-xs">Pause</span>
+              </>
+            ) : (
+              <>
+                <Play className="h-3.5 w-3.5" />
+                <span className="text-xs">Resume</span>
+              </>
+            )}
+          </Button>
+        </div>
+        <div className="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground">
+          <Activity className="mx-auto mb-2 h-5 w-5 opacity-50" />
+          {!monitoringEnabled && "Monitoring paused (power saving)"}
+          {monitoringEnabled && status === "connecting" && "Connecting to scan quality monitor..."}
+          {monitoringEnabled && status === "disconnected" && "Scan quality monitor disconnected"}
+          {monitoringEnabled && status === "connected" && quality?.status === "no_data" && "Waiting for scan data..."}
+        </div>
       </div>
     )
   }
@@ -49,6 +75,19 @@ export default function ScanQualityPanel() {
 
   return (
     <div className="space-y-3">
+      {/* Header with toggle button */}
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-medium text-muted-foreground">Scan Quality</div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={toggleMonitoring}
+          className="h-7 gap-1.5 px-2"
+        >
+          <Pause className="h-3.5 w-3.5" />
+          <span className="text-xs">Pause</span>
+        </Button>
+      </div>
       {/* Quality Level Badge */}
       <div className={`flex items-center gap-2 rounded-lg border p-3 ${qualityStyle.bg}`}>
         <div className={qualityStyle.text}>{qualityStyle.icon}</div>

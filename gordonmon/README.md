@@ -28,6 +28,11 @@ Config (env)
 - `MEDIAMTX_HTTP_PORT` (default: 8889)
 - `MEDIAMTX_RTSP_PORT` (default: 8554)
 
+Backend options
+- `GORDONMON_BACKEND_LOG_LEVEL` (default: info) - Set backend log level (debug, info, warning, error)
+- `GORDONMON_BACKEND_ACCESS_LOG` (default: false) - Enable/disable Uvicorn access logs
+- `GORDONMON_BACKEND_RELOAD` (default: false) - Enable Uvicorn auto-reload on file changes (development only, increases power consumption)
+
 Log view mode
 - Default: pager-like (does not auto-follow; scroll with mouse or PgUp/PgDn). Toggle at runtime with `P`.
 - To start in tail-follow mode instead, set `GORDONMON_PAGER=0` (or `false`).

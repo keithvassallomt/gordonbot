@@ -91,6 +91,7 @@ export function useScanQuality() {
   const [status, setStatus] = useState<TransportStatus>("disconnected")
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [isReconnecting, setIsReconnecting] = useState(false)
+  const [monitoringEnabled, setMonitoringEnabled] = useState(false)
 
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<number | null>(null)
@@ -188,12 +189,56 @@ export function useScanQuality() {
     }
   }, [clearReconnectTimer])
 
+  const enableMonitoring = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/scan-quality/enable`, {
+        method: "POST",
+      })
+      if (response.ok) {
+        setMonitoringEnabled(true)
+        console.debug("Scan quality monitoring enabled")
+      }
+    } catch (err) {
+      console.error("Failed to enable scan quality monitoring", err)
+    }
+  }, [])
+
+  const disableMonitoring = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/scan-quality/disable`, {
+        method: "POST",
+      })
+      if (response.ok) {
+        setMonitoringEnabled(false)
+        console.debug("Scan quality monitoring disabled")
+      }
+    } catch (err) {
+      console.error("Failed to disable scan quality monitoring", err)
+    }
+  }, [])
+
+  const toggleMonitoring = useCallback(async () => {
+    if (monitoringEnabled) {
+      await disableMonitoring()
+    } else {
+      await enableMonitoring()
+    }
+  }, [monitoringEnabled, enableMonitoring, disableMonitoring])
+
   useEffect(() => {
     stopRef.current = false
     connect()
+    // Enable monitoring when component mounts
+    enableMonitoring()
     return () => {
       disconnect()
+      // Disable monitoring when component unmounts
+      // Note: This creates a closure over the current disableMonitoring function
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      disableMonitoring()
     }
+    // Only re-run when connect/disconnect change, not when enable/disable change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connect, disconnect])
 
   const clearError = useCallback(() => {
@@ -206,5 +251,9 @@ export function useScanQuality() {
     errorMessage,
     clearError,
     reconnecting: isReconnecting,
+    monitoringEnabled,
+    enableMonitoring,
+    disableMonitoring,
+    toggleMonitoring,
   }
 }

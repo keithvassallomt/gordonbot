@@ -181,7 +181,8 @@ def generate_launch_description():
                 'min_angular_coverage': 0.7,
                 'max_allowed_gap': 45.0,
                 'expected_scan_rate': 10.0,
-                'report_rate_hz': 1.0
+                'report_rate_hz': 1.0,
+                'enable_monitoring': False
             }]
         ),
     ])
